@@ -3,4 +3,17 @@ name = "dc2017"
 version = "0.1.0"
 authors = ["S.Percentage <Syn.Tri.Naga@gmail.com>"]
 
+[features]
+target_x11 = ["ws_common/target_x11", "ferrite/VK_KHR_xcb_surface"]
+
+# testing
+default = ["target_x11"]
+
 [dependencies]
+appinstance = { git = "https://github.com/Pctg-x8/appinstance" }
+libc = "0.2"
+ws_common = { git = "https://github.com/Pctg-x8/ws_common_rs", features = ["with_ferrite"] }
+
+[dependencies.ferrite]
+git = "https://github.com/Pctg-x8/ferrite"
+features = ["FeImplements", "FePresentation"]
