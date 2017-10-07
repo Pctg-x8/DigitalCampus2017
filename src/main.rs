@@ -14,7 +14,8 @@ use std::ffi::CStr;
 pub struct VulkanRenderDevice
 {
     instance: fe::Instance, adapter: fe::PhysicalDevice, device: fe::Device, graphics_queue: (u32, fe::Queue), transfer_queue: (u32, fe::Queue),
-    surface: fe::Surface, swapchain: fe::Swapchain, rt_views: Vec<fe::ImageView>
+    surface: fe::Surface, swapchain: fe::Swapchain, rt_views: Vec<fe::ImageView>,
+    #[cfg(debug)] debug_report: fe::DebugReportCallback
 }
 impl VulkanRenderDevice
 {
@@ -25,9 +26,11 @@ impl VulkanRenderDevice
     {
         let mut ibuilder = fe::InstanceBuilder::new("dc2017", (0, 1, 0), "ferrite", (0, 1, 0));
         ibuilder.add_extensions(vec!["VK_KHR_surface", Self::PLATFORM_SURFACE_EXTENSION]);
-        #[cfg(debug)] ibuilder.add_extension("VK_EXT_debug_report");
-        #[cfg(debug)] ibuilder.add_layer("VK_LAYER_LUNARG_standard_validation");
+        #[cfg(debug)] ibuilder.add_extension("VK_EXT_debug_report").add_layer("VK_LAYER_LUNARG_standard_validation");
         let instance = ibuilder.create()?;
+        #[cfg(debug)]
+        let debug_report = fe::DebugReportCallback::<()>::new(&instance, fe::DebugReportFlags::ERROR.warning().performance_warning(),
+            Self::debug_call, None).expect("Failed to create a debug reporter object");
         let adapter = instance.enumerate_physical_devices().expect("PhysicalDevices are not found").remove(0);
         let adapter_properties = adapter.properties();
         println!("RenderDevice: Vulkan 1.0 on {}", unsafe { CStr::from_ptr(adapter_properties.deviceName.as_ptr()) }.to_str().unwrap());
@@ -77,7 +80,18 @@ impl VulkanRenderDevice
             aspect_mask: fe::AspectMask::COLOR, mip_levels: 0 .. 1, array_layers: 0 .. 1
         })).collect::<Result<Vec<_>, _>>().expect("Failed to create views to each swapchain buffers");
 
-        Ok(VulkanRenderDevice { instance, adapter, device, graphics_queue: gq, transfer_queue: tq, surface, swapchain, rt_views: views })
+        #[cfg(debug)]
+        { Ok(VulkanRenderDevice { instance, adapter, device, graphics_queue: gq, transfer_queue: tq, surface, swapchain, rt_views: views, debug_report }) }
+        #[cfg(not(debug))]
+        { Ok(VulkanRenderDevice { instance, adapter, device, graphics_queue: gq, transfer_queue: tq, surface, swapchain, rt_views: views }) }
+    }
+
+    #[cfg(debug)]
+    #[allow(dead_code)]
+    extern "system" fn debug_call(flags: fe::vk::VkDebugReportFlagsEXT, object_type: fe::vk::VkDebugReportObjectTypeEXT,
+        object: u64, location: libc::size_t, message_code: i32, layer_prefix: *const libc::c_char, message: *const libc::c_char, user_data: *mut libc::c_void) -> fe::vk::VkBool32
+    {
+        println!("[debug_call]{:?}", unsafe { CStr::from_ptr(message) }); fe::vk::VK_FALSE
     }
 }
 impl Drop for VulkanRenderDevice
