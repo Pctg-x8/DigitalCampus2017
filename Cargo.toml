@@ -2,18 +2,25 @@
 name = "dc2017"
 version = "0.1.0"
 authors = ["S.Percentage <Syn.Tri.Naga@gmail.com>"]
+publish = false
+build = "build.rs"
 
 [features]
 target_x11 = ["ws_common/target_x11", "ferrite/VK_KHR_xcb_surface"]
 
 # testing
-default = ["target_x11"]
+# default = ["target_x11"]
 
 [dependencies]
 appinstance = { git = "https://github.com/Pctg-x8/appinstance" }
 libc = "0.2"
 ws_common = { git = "https://github.com/Pctg-x8/ws_common_rs", features = ["with_ferrite"] }
+dc_web = { git = "https://github.com/Pctg-x8/DigitalCampus2017P" }
 
-[dependencies.ferrite]
+[target.'cfg(not(windows))'.dependencies.ferrite]
 git = "https://github.com/Pctg-x8/ferrite"
 features = ["FeImplements", "FePresentation"]
+
+[target.'cfg(windows)'.dependencies.ferrite]
+git = "https://github.com/Pctg-x8/ferrite"
+features = ["FeImplements", "FePresentation", "VK_KHR_win32_surface"]
