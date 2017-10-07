@@ -9,6 +9,7 @@ use ferrite as fe;
 use ferrite::Waitable;
 use std::cmp::max;
 use std::io::{Result as IOResult, Error as IOError, ErrorKind};
+use std::ffi::CStr;
 
 pub struct VulkanRenderDevice
 {
@@ -28,6 +29,8 @@ impl VulkanRenderDevice
         #[cfg(debug)] ibuilder.add_layer("VK_LAYER_LUNARG_standard_validation");
         let instance = ibuilder.create()?;
         let adapter = instance.enumerate_physical_devices().expect("PhysicalDevices are not found").remove(0);
+        let adapter_properties = adapter.properties();
+        println!("RenderDevice: Vulkan 1.0 on {}", unsafe { CStr::from_ptr(adapter_properties.deviceName.as_ptr()) }.to_str().unwrap());
         let queue_families = adapter.queue_family_properties();
         let graphics_qf = queue_families.find_matching_index(fe::QueueFlags::GRAPHICS).expect("Failed to find graphics queue family");
         let transfer_qf = queue_families.find_matching_index(fe::QueueFlags::TRANSFER).unwrap_or(graphics_qf);
@@ -146,5 +149,6 @@ impl Application
 fn main()
 {
     println!("=== DIGITAL CAMPUS 2017 ===");
+    RenderDevice::instance();
     Application::instance().process_events();
 }
