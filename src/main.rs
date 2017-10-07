@@ -8,7 +8,7 @@ use ws_common::{NativeWindow, WindowServer};
 use ferrite as fe;
 use ferrite::Waitable;
 use std::cmp::max;
-use std::io::Result as IOResult;
+use std::io::{Result as IOResult, Error as IOError, ErrorKind};
 
 pub struct VulkanRenderDevice
 {
@@ -82,10 +82,12 @@ impl Drop for VulkanRenderDevice
     fn drop(&mut self) { self.device.wait().unwrap(); }
 }
 
+#[cfg(windows)]
 pub struct D3D12RenderDevice
 {
 
 }
+#[cfg(windows)]
 impl D3D12RenderDevice
 {
     fn new() -> IOResult<Self>
@@ -93,10 +95,18 @@ impl D3D12RenderDevice
         
     }
 }
+#[cfg(not(windows))] pub struct D3D12RenderDevice;
+#[cfg(not(windows))] impl D3D12RenderDevice
+{
+    fn new() -> IOResult<Self>
+    {
+        Err(IOError::new(ErrorKind::Other, "Unsupported Platform for DirectX12"))
+    }
+}
 
 pub enum RenderDevice
 {
-    Vulkan(VulkanRenderDevice), DirectX12()
+    Vulkan(VulkanRenderDevice), DirectX12(D3D12RenderDevice)
 }
 impl RenderDevice
 {
@@ -108,7 +118,7 @@ impl RenderDevice
             Err(e) =>
             {
                 println!("Failed to initialize Vulkan backend({:?}). Falling back into DirectX12 backend", e);
-                RenderDevice::DirectX12()
+                RenderDevice::DirectX12(D3D12RenderDevice::new().expect("Failed to initialize RenderDevice"))
             },
             Ok(vrd) => RenderDevice::Vulkan(vrd)
         }
