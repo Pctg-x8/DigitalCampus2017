@@ -7,9 +7,10 @@ build = "build.rs"
 
 [features]
 target_x11 = ["ws_common/target_x11", "ferrite/VK_KHR_xcb_surface"]
+debug = ["ferrite/VK_EXT_debug_report"]
 
 # testing
-default = ["target_x11"]
+# default = ["target_x11"]
 
 [dependencies]
 appinstance = { git = "https://github.com/Pctg-x8/appinstance" }
@@ -25,6 +26,6 @@ freetype-sys = "0.3"
 git = "https://github.com/Pctg-x8/ferrite"
 features = ["FeImplements", "FePresentation"]
 
-# [target.'cfg(windows)'.dependencies.ferrite]
-# git = "https://github.com/Pctg-x8/ferrite"
-# features = ["FeImplements", "FePresentation", "VK_KHR_win32_surface"]
+[target.'cfg(windows)'.dependencies.ferrite]
+git = "https://github.com/Pctg-x8/ferrite"
+features = ["FeImplements", "FePresentation", "VK_KHR_win32_surface"]
