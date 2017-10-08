@@ -115,7 +115,7 @@ impl RenderDevice
             let p = &self.agent_str as *const _ as *mut _;
             let adapter_properties = self.adapter.properties();
             let device_name = unsafe { CStr::from_ptr(adapter_properties.deviceName.as_ptr()).to_str().unwrap() };
-            unsafe { *p = Some(format!("Vulkan 1.0 on {}", device_name)); }
+            unsafe { *p = Some(format!("Vulkan {}", device_name)); }
         }
         self.agent_str.as_ref().unwrap()
     }

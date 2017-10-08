@@ -26,6 +26,15 @@ freetype-sys = "0.3"
 git = "https://github.com/Pctg-x8/ferrite"
 features = ["FeImplements", "FePresentation"]
 
+[target.'cfg(windows)'.dependencies]
+metrics = { path = "../metrics" }
+comdrive = { path = "../comdrive" }
+widestring = "0.2"
+
 [target.'cfg(windows)'.dependencies.ferrite]
 git = "https://github.com/Pctg-x8/ferrite"
 features = ["FeImplements", "FePresentation", "VK_KHR_win32_surface"]
+
+[target.'cfg(windows)'.dependencies.winapi]
+git = "https://github.com/retep998/winapi-rs"
+branch = "dev"

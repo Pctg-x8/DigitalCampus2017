@@ -14,13 +14,13 @@ impl RenderDevice
 
     fn new() -> Self
     {
-        let rd = vk::RenderDevice::init();
+        let rd = d3d12::RenderDevice::init();
         let e = match rd
         {
-            Ok(vrd) => return RenderDevice::Vulkan(vrd), Err(e) => e
+            Ok(vrd) => return RenderDevice::DirectX12(vrd), Err(e) => e
         };
-        println!("!! Failed to initialize Vulkan backend({:?}). Falling back into DirectX12 backend", e);
-        RenderDevice::DirectX12(d3d12::RenderDevice::init().expect("Failed to initialize RenderDevice"))
+        println!("!! Failed to initialize DirectX12 backend({:?}). Falling back into Vulkan backend", e);
+        RenderDevice::Vulkan(vk::RenderDevice::init().expect("Failed to initialize RenderDevice"))
     }
 
     pub fn agent(&self) -> &str
