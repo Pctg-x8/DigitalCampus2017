@@ -52,7 +52,7 @@ impl WelcomeSceneRender
         let logo_svg = SVGLoader::load("assets/logo_ColoredLogo.svgz").expect("Failed to load the university logo");
         let path_groups = logo_svg.descendants().find(|n| *n.id() == "枠").unwrap().first_child().unwrap()
             .children().filter(|n| n.tag_id() == Some(svgdom::ElementId::G));
-        for p in path_groups.flat_map(|g| g.children().filter(|n| n.tag_id() == Some(svgdom::ElementId::Path)))
+        /*for p in path_groups.flat_map(|g| g.children().filter(|n| n.tag_id() == Some(svgdom::ElementId::Path)))
         {
             println!("- {:?}", p);
             if let svgdom::AttributeValue::Path(ref pd) = p.attributes().get(svgdom::AttributeId::D).unwrap().value
@@ -60,7 +60,17 @@ impl WelcomeSceneRender
                 for segment in &pd.d { println!("-- {:?}", segment); }
             }
             else { unreachable!(); }
-        }
+        }*/
+        let mut paths = path_groups.flat_map(|g| g.children().filter(|n| n.tag_id() == Some(svgdom::ElementId::Path)));
+        let iter = paths.map(|ref p|
+        {
+            if let &svgdom::AttributeValue::Path(ref pd) = p.attributes().get_value(svgdom::AttributeId::D).unwrap()
+            {
+                pd.d.iter()
+            }
+            else { unreachable!(); }
+        });
+        let logo = RenderDevice::get().realize_svg_segments(iter).expect("Failed to realize the svg");
         WelcomeSceneRender {}
     }
 }

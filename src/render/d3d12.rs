@@ -6,9 +6,11 @@ use winapi::shared::dxgiformat::*;
 use metrics::*;
 use widestring::WideCStr;
 use std::iter::Iterator;
-use svgdom::types::path::Segment;
+use svgdom::types::path::{Segment, SegmentData};
+use std::mem::transmute;
 
-struct VectorImage { inner: d2::PathGeometry }
+pub struct PathImage { inner: d2::PathGeometry }
+impl super::VectorImage for PathImage {}
 
 pub struct RenderDevice
 {
@@ -56,70 +58,92 @@ impl RenderDevice
         self.agent_str.as_ref().unwrap()
     }
 
-    pub fn realize_svg_segments<'a, Iter: Iterator<Item = &'a [Segment]>>(&self, provider: Iter) -> IOResult<VectorImage>
+    pub fn realize_svg_segments<'a, Iter: Iterator>(&self, provider: Iter) -> IOResult<PathImage> where
+        Iter::Item: Iterator<Item = &'a Segment>
     {
         let p = self.dev2.factory().new_path_geometry()?;
         let sink = p.open()?;
         for figure in provider
         {
+            let mut prev = Point2F(0.0, 0.0);
+            let mut last_curve_pvec = Point2F(0.0, 0.0);
+            let mut closed = false;
             for segment in figure
             {
-                let mut prev = Point2F(0, 0);
-                let mut last_curve_pvec = Point2F(0, 0);
                 match segment.data
                 {
-                    Segment::MoveTo { x, y } =>
+                    SegmentData::MoveTo { x, y } =>
                     {
-                        prev = if segment.absolute { Point2F(x, y) } else { prev + Point2F(x, y) };
+                        prev = if segment.absolute { Point2F(x as _, y as _) } else { prev + Point2F(x as _, y as _) };
                         sink.begin_figure(prev, true);
                     },
-                    Segment::LineTo { x, y } =>
+                    SegmentData::LineTo { x, y } =>
                     {
-                        prev = if segment.absolute { Point2F(x, y) } else { prev + Point2F(x, y) };
+                        prev = if segment.absolute { Point2F(x as _, y as _) } else { prev + Point2F(x as _, y as _) };
                         sink.add(&prev);
                     },
-                    Segment::HorizontalLineTo { x } =>
+                    SegmentData::HorizontalLineTo { x } =>
                     {
-                        prev = if segment.absolute { Point2F(x, prev.y()) } else { prev + Point2F(x, 0) };
+                        prev = if segment.absolute { Point2F(x as _, prev.y()) } else { prev + Point2F(x as _, 0.0) };
                         sink.add(&prev);
                     },
-                    Segment::VerticalLineTo { y } =>
+                    SegmentData::VerticalLineTo { y } =>
                     {
-                        prev = if segment.absolute { Point2F(prev.x(), y) } else { prev + Point2F(0, y) };
-                        sink.add(&prev)
+                        prev = if segment.absolute { Point2F(prev.x(), y as _) } else { prev + Point2F(0.0, y as _) };
+                        sink.add(&prev);
                     },
-                    Segment::CurveTo { x1, y1, x2, y2, x, y } =>
+                    SegmentData::CurveTo { x1, y1, x2, y2, x, y } =>
                     {
-                        let p0 = if segment.absolute { d2::Point2F { x: x1, y: y1 } } else { d2::Point2F { x: x1 + prev.x(), y: y1 + prev.y() } };
-                        let p1 = if segment.absolute { d2::Point2F { x: x2, y: y2 } } else { d2::Point2F { x: x2 + prev.x(), y: y2 + prev.y() } };
-                        prev = if segment.absolute { Point2F(x, y) } else { prev + Point2F(x, y) };
-                        last_curve_pvec = prev - p1;
+                        let p0 = if segment.absolute { d2::Point2F { x: x1 as _, y: y1 as _ } } else { d2::Point2F { x: x1 as f32 + prev.x(), y: y1 as f32 + prev.y() } };
+                        let p1 = if segment.absolute { d2::Point2F { x: x2 as _, y: y2 as _ } } else { d2::Point2F { x: x2 as f32 + prev.x(), y: y2 as f32 + prev.y() } };
+                        prev = if segment.absolute { Point2F(x as _, y as _) } else { prev + Point2F(x as _, y as _) };
+                        last_curve_pvec = prev - unsafe { transmute::<_, Point2F>(p1) };
                         sink.add(&d2::BezierSegment { point1: p0, point2: p1, point3: *transmute_safe(&prev) });
                     },
-                    Segment::SmoothCurveTo { x2, y2, x, y } =>
+                    SegmentData::SmoothCurveTo { x2, y2, x, y } =>
                     {
                         let p0 = prev + last_curve_pvec;
-                        let p1 = if segment.absolute { d2::Point2F { x: x2, y: y2 } } else { d2::Point2F { x: x2 + prev.x(), y: y2 + prev.y() } };
-                        prev = if segment.absolute { Point2F(x, y) } else { prev + Point2F(x, y) };
-                        last_curve_pvec = prev - p1;
-                        sink.add(&d2::BezierSegment { point1: p0, point2: p1, point3: *transmute_safe(&prev) });
+                        let p1 = if segment.absolute { d2::Point2F { x: x2 as _, y: y2 as _ } } else { d2::Point2F { x: x2 as f32 + prev.x(), y: y2 as f32 + prev.y() } };
+                        prev = if segment.absolute { Point2F(x as _, y as _) } else { prev + Point2F(x as _, y as _) };
+                        last_curve_pvec = prev - unsafe { transmute::<_, Point2F>(p1) };
+                        sink.add(&d2::BezierSegment { point1: *transmute_safe(&p0), point2: p1, point3: *transmute_safe(&prev) });
                     },
-                    Segment::Quadratic { x1, y1, x, y } =>
+                    SegmentData::Quadratic { x1, y1, x, y } =>
                     {
-                        let p0 = if segment.absolute { d2::Point2F { x: x1, y: y1 } } else { d2::Point2F { x: x1 + prev.x(), y: y1 + prev.y() } };
-                        prev = if segment.absolute { Point2F(x, y) } else { prev + Point2F(x, y) };
-                        last_curve_pvec = prev - p0;
+                        let p0 = if segment.absolute { d2::Point2F { x: x1 as _, y: y1 as _ } } else { d2::Point2F { x: x1 as f32 + prev.x(), y: y1 as f32 + prev.y() } };
+                        prev = if segment.absolute { Point2F(x as _, y as _) } else { prev + Point2F(x as _, y as _) };
+                        last_curve_pvec = prev - unsafe { transmute::<_, Point2F>(p0) };
                         sink.add(&d2::QuadraticBezierSegment { point1: p0, point2: *transmute_safe(&prev) });
                     },
-                    Segment::SmoothQuadratic { x, y } =>
+                    SegmentData::SmoothQuadratic { x, y } =>
                     {
                         let p0 = prev + last_curve_pvec;
-                        prev = if segment.absolute { Point2F(x, y) } else { prev + Point2F(x, y) };
-                        last_curve_pvec = prev - p0;
-                        sink.add(&d2::QuadraticBezierSegment { point1: p0, point2: *transmute_safe(&prev) });
+                        prev = if segment.absolute { Point2F(x as _, y as _) } else { prev + Point2F(x as _, y as _) };
+                        last_curve_pvec = prev - unsafe { transmute::<_, Point2F>(p0) };
+                        sink.add(&d2::QuadraticBezierSegment { point1: *transmute_safe(&p0), point2: *transmute_safe(&prev) });
+                    },
+                    SegmentData::EllipticalArc { rx, ry, x_axis_rotation, large_arc, sweep, x, y } =>
+                    {
+                        prev = if segment.absolute { Point2F(x as _, y as _) } else { prev + Point2F(x as _, y as _) };
+                        sink.add(&d2::ArcSegment
+                        {
+                            point: *transmute_safe(&prev), size: d2::SizeF { width: rx as _, height: ry as _ },
+                            rotationAngle: x_axis_rotation as _,
+                            arcSize: if !large_arc { d2::ArcSize::Small } else { d2::ArcSize::Large } as _,
+                            sweepDirection: if !sweep { d2::SweepDirection::CCW } else { d2::SweepDirection::CW } as _
+                        });
+                    },
+                    SegmentData::ClosePath =>
+                    {
+                        assert!(!closed); closed = true;
+                        sink.end_figure(true);
                     }
                 }
             }
+            if !closed { sink.end_figure(false); }
         }
+        sink.close();
+
+        Ok(PathImage { inner: p })
     }
 }
