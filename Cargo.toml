@@ -17,6 +17,8 @@ appinstance = { git = "https://github.com/Pctg-x8/appinstance" }
 libc = "0.2"
 ws_common = { git = "https://github.com/Pctg-x8/ws_common_rs", features = ["with_ferrite"] }
 dc_web = { git = "https://github.com/Pctg-x8/DigitalCampus2017P" }
+flate2 = "0.2"
+svgdom = "0.8"
 
 [target.'cfg(not(windows))'.dependencies]
 harfbuzz-sys = "0.1"
