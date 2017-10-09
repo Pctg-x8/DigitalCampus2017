@@ -47,7 +47,7 @@ impl RenderDevice
             let p = &self.agent_str as *const _ as *mut _;
             let adapter_desc = self.adapter.desc().expect("Failed to retrieve an adapter description");
             let desc_str = unsafe { WideCStr::from_ptr_str(adapter_desc.Description.as_ptr()).to_string_lossy() };
-            unsafe { *p = Some(format!("Direct3D12 {}", desc_str)); }
+            unsafe { *p = Some(format!("Direct3D12 {:?}", desc_str)); }
         }
         self.agent_str.as_ref().unwrap()
     }
