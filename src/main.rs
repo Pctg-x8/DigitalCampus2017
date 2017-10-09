@@ -55,6 +55,11 @@ impl WelcomeSceneRender
         for p in path_groups.flat_map(|g| g.children().filter(|n| n.tag_id() == Some(svgdom::ElementId::Path)))
         {
             println!("- {:?}", p);
+            if let svgdom::AttributeValue::Path(ref pd) = p.attributes().get(svgdom::AttributeId::D).unwrap().value
+            {
+                for segment in &pd.d { println!("-- {:?}", segment); }
+            }
+            else { unreachable!(); }
         }
         WelcomeSceneRender {}
     }

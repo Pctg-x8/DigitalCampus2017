@@ -3,8 +3,12 @@ use std::io::Result as IOResult;
 use comdrive::*;
 use Application;
 use winapi::shared::dxgiformat::*;
-use metrics::Size2U;
+use metrics::*;
 use widestring::WideCStr;
+use std::iter::Iterator;
+use svgdom::types::path::Segment;
+
+struct VectorImage { inner: d2::PathGeometry }
 
 pub struct RenderDevice
 {
@@ -50,5 +54,72 @@ impl RenderDevice
             unsafe { *p = Some(format!("Direct3D12 {:?}", desc_str)); }
         }
         self.agent_str.as_ref().unwrap()
+    }
+
+    pub fn realize_svg_segments<'a, Iter: Iterator<Item = &'a [Segment]>>(&self, provider: Iter) -> IOResult<VectorImage>
+    {
+        let p = self.dev2.factory().new_path_geometry()?;
+        let sink = p.open()?;
+        for figure in provider
+        {
+            for segment in figure
+            {
+                let mut prev = Point2F(0, 0);
+                let mut last_curve_pvec = Point2F(0, 0);
+                match segment.data
+                {
+                    Segment::MoveTo { x, y } =>
+                    {
+                        prev = if segment.absolute { Point2F(x, y) } else { prev + Point2F(x, y) };
+                        sink.begin_figure(prev, true);
+                    },
+                    Segment::LineTo { x, y } =>
+                    {
+                        prev = if segment.absolute { Point2F(x, y) } else { prev + Point2F(x, y) };
+                        sink.add(&prev);
+                    },
+                    Segment::HorizontalLineTo { x } =>
+                    {
+                        prev = if segment.absolute { Point2F(x, prev.y()) } else { prev + Point2F(x, 0) };
+                        sink.add(&prev);
+                    },
+                    Segment::VerticalLineTo { y } =>
+                    {
+                        prev = if segment.absolute { Point2F(prev.x(), y) } else { prev + Point2F(0, y) };
+                        sink.add(&prev)
+                    },
+                    Segment::CurveTo { x1, y1, x2, y2, x, y } =>
+                    {
+                        let p0 = if segment.absolute { d2::Point2F { x: x1, y: y1 } } else { d2::Point2F { x: x1 + prev.x(), y: y1 + prev.y() } };
+                        let p1 = if segment.absolute { d2::Point2F { x: x2, y: y2 } } else { d2::Point2F { x: x2 + prev.x(), y: y2 + prev.y() } };
+                        prev = if segment.absolute { Point2F(x, y) } else { prev + Point2F(x, y) };
+                        last_curve_pvec = prev - p1;
+                        sink.add(&d2::BezierSegment { point1: p0, point2: p1, point3: *transmute_safe(&prev) });
+                    },
+                    Segment::SmoothCurveTo { x2, y2, x, y } =>
+                    {
+                        let p0 = prev + last_curve_pvec;
+                        let p1 = if segment.absolute { d2::Point2F { x: x2, y: y2 } } else { d2::Point2F { x: x2 + prev.x(), y: y2 + prev.y() } };
+                        prev = if segment.absolute { Point2F(x, y) } else { prev + Point2F(x, y) };
+                        last_curve_pvec = prev - p1;
+                        sink.add(&d2::BezierSegment { point1: p0, point2: p1, point3: *transmute_safe(&prev) });
+                    },
+                    Segment::Quadratic { x1, y1, x, y } =>
+                    {
+                        let p0 = if segment.absolute { d2::Point2F { x: x1, y: y1 } } else { d2::Point2F { x: x1 + prev.x(), y: y1 + prev.y() } };
+                        prev = if segment.absolute { Point2F(x, y) } else { prev + Point2F(x, y) };
+                        last_curve_pvec = prev - p0;
+                        sink.add(&d2::QuadraticBezierSegment { point1: p0, point2: *transmute_safe(&prev) });
+                    },
+                    Segment::SmoothQuadratic { x, y } =>
+                    {
+                        let p0 = prev + last_curve_pvec;
+                        prev = if segment.absolute { Point2F(x, y) } else { prev + Point2F(x, y) };
+                        last_curve_pvec = prev - p0;
+                        sink.add(&d2::QuadraticBezierSegment { point1: p0, point2: *transmute_safe(&prev) });
+                    }
+                }
+            }
+        }
     }
 }
