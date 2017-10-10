@@ -5,9 +5,7 @@ use Application;
 use winapi::shared::dxgiformat::*;
 use metrics::*;
 use widestring::WideCStr;
-use std::iter::Iterator;
-use svgdom::types::path::{Segment, SegmentData};
-use std::mem::transmute;
+// use svgparse::{ArcSweepingDirection, Segment};
 
 pub struct PathImage { inner: d2::PathGeometry }
 impl super::VectorImage for PathImage {}
@@ -58,7 +56,7 @@ impl RenderDevice
         self.agent_str.as_ref().unwrap()
     }
 
-    pub fn realize_svg_segments<'a, Iter: Iterator>(&self, provider: Iter) -> IOResult<PathImage> where
+    /*pub fn realize_svg_segments<'a, Iter: Iterator>(&self, provider: Iter) -> IOResult<PathImage> where
         Iter::Item: Iterator<Item = &'a Segment>
     {
         let p = self.dev2.factory().new_path_geometry()?;
@@ -70,70 +68,92 @@ impl RenderDevice
             let mut closed = false;
             for segment in figure
             {
-                match segment.data
+                fn reforming(p: &Point2LF) -> Point2F { Point2F(p.0 as _, p.1 as _) }
+                fn reforming2(p: &Point2LF) -> d2::Point2F { d2::Point2F { x: p.0 as _, y: p.1 as _ } }
+                match *segment
                 {
-                    SegmentData::MoveTo { x, y } =>
+                    Segment::MoveTo(ref p) => { prev = prev + p; sink.begin_figure(prev, true); },
+                    Segment::MoveToAbs(ref p) => { prev = reforming(p); sink.begin_figure(prev, true); },
+                    Segment::LineTo(ref p) => { prev = prev + p; sink.add(&prev); },
+                    Segment::LineToAbs(ref p) => { prev = reforming(p); sink.add(&prev); },
+                    Segment::HorizontalLineTo(x) => { prev.0 += x as f32; sink.add(&prev); },
+                    Segment::HorizontalLineToAbs(x) => { prev.0 = x as f32; sink.add(&prev); },
+                    Segment::VerticalLineTo(y) => { prev.1 += y as f32; sink.add(&prev); },
+                    Segment::VerticalLineToAbs(y) => { prev.1 = y as f32; sink.add(&prev); },
+                    Segment::CurveTo(ref p1, ref p2, ref p3) =>
                     {
-                        prev = if segment.absolute { Point2F(x as _, y as _) } else { prev + Point2F(x as _, y as _) };
-                        sink.begin_figure(prev, true);
-                    },
-                    SegmentData::LineTo { x, y } =>
-                    {
-                        prev = if segment.absolute { Point2F(x as _, y as _) } else { prev + Point2F(x as _, y as _) };
-                        sink.add(&prev);
-                    },
-                    SegmentData::HorizontalLineTo { x } =>
-                    {
-                        prev = if segment.absolute { Point2F(x as _, prev.y()) } else { prev + Point2F(x as _, 0.0) };
-                        sink.add(&prev);
-                    },
-                    SegmentData::VerticalLineTo { y } =>
-                    {
-                        prev = if segment.absolute { Point2F(prev.x(), y as _) } else { prev + Point2F(0.0, y as _) };
-                        sink.add(&prev);
-                    },
-                    SegmentData::CurveTo { x1, y1, x2, y2, x, y } =>
-                    {
-                        let p0 = if segment.absolute { d2::Point2F { x: x1 as _, y: y1 as _ } } else { d2::Point2F { x: x1 as f32 + prev.x(), y: y1 as f32 + prev.y() } };
-                        let p1 = if segment.absolute { d2::Point2F { x: x2 as _, y: y2 as _ } } else { d2::Point2F { x: x2 as f32 + prev.x(), y: y2 as f32 + prev.y() } };
-                        prev = if segment.absolute { Point2F(x as _, y as _) } else { prev + Point2F(x as _, y as _) };
-                        last_curve_pvec = prev - unsafe { transmute::<_, Point2F>(p1) };
-                        sink.add(&d2::BezierSegment { point1: p0, point2: p1, point3: *transmute_safe(&prev) });
-                    },
-                    SegmentData::SmoothCurveTo { x2, y2, x, y } =>
-                    {
-                        let p0 = prev + last_curve_pvec;
-                        let p1 = if segment.absolute { d2::Point2F { x: x2 as _, y: y2 as _ } } else { d2::Point2F { x: x2 as f32 + prev.x(), y: y2 as f32 + prev.y() } };
-                        prev = if segment.absolute { Point2F(x as _, y as _) } else { prev + Point2F(x as _, y as _) };
-                        last_curve_pvec = prev - unsafe { transmute::<_, Point2F>(p1) };
-                        sink.add(&d2::BezierSegment { point1: *transmute_safe(&p0), point2: p1, point3: *transmute_safe(&prev) });
-                    },
-                    SegmentData::Quadratic { x1, y1, x, y } =>
-                    {
-                        let p0 = if segment.absolute { d2::Point2F { x: x1 as _, y: y1 as _ } } else { d2::Point2F { x: x1 as f32 + prev.x(), y: y1 as f32 + prev.y() } };
-                        prev = if segment.absolute { Point2F(x as _, y as _) } else { prev + Point2F(x as _, y as _) };
-                        last_curve_pvec = prev - unsafe { transmute::<_, Point2F>(p0) };
-                        sink.add(&d2::QuadraticBezierSegment { point1: p0, point2: *transmute_safe(&prev) });
-                    },
-                    SegmentData::SmoothQuadratic { x, y } =>
-                    {
-                        let p0 = prev + last_curve_pvec;
-                        prev = if segment.absolute { Point2F(x as _, y as _) } else { prev + Point2F(x as _, y as _) };
-                        last_curve_pvec = prev - unsafe { transmute::<_, Point2F>(p0) };
-                        sink.add(&d2::QuadraticBezierSegment { point1: *transmute_safe(&p0), point2: *transmute_safe(&prev) });
-                    },
-                    SegmentData::EllipticalArc { rx, ry, x_axis_rotation, large_arc, sweep, x, y } =>
-                    {
-                        prev = if segment.absolute { Point2F(x as _, y as _) } else { prev + Point2F(x as _, y as _) };
-                        sink.add(&d2::ArcSegment
+                        let p2 = prev + &reforming(p2); prev = prev + &reforming(p3);
+                        last_curve_pvec = prev - &p2;
+                        sink.add(&d2::BezierSegment
                         {
-                            point: *transmute_safe(&prev), size: d2::SizeF { width: rx as _, height: ry as _ },
-                            rotationAngle: x_axis_rotation as _,
-                            arcSize: if !large_arc { d2::ArcSize::Small } else { d2::ArcSize::Large } as _,
-                            sweepDirection: if !sweep { d2::SweepDirection::CCW } else { d2::SweepDirection::CW } as _
+                            point1: *transmute_safe(&(prev + &reforming(p1))), point2: *transmute_safe(&p2), point3: *transmute_safe(&prev)
                         });
                     },
-                    SegmentData::ClosePath =>
+                    Segment::CurveToAbs(ref p1, ref p2, ref p3) =>
+                    {
+                        prev = reforming(p3); last_curve_pvec = prev - &reforming(p2);
+                        sink.add(&d2::BezierSegment { point1: reforming2(p1), point2: reforming2(p2), point3: *transmute_safe(&prev) });
+                    },
+                    Segment::QuadCurveTo(ref p1, ref p2) =>
+                    {
+                        let p1 = prev + &reforming(p1); prev = prev + &reforming(p2);
+                        last_curve_pvec = prev - &p1;
+                        sink.add(&d2::QuadraticBezierSegment { point1: *transmute_safe(&p1), point2: *transmute_safe(&prev) });
+                    },
+                    Segment::QuadCurveToAbs(ref p1, ref p2) =>
+                    {
+                        prev = reforming(p2); last_curve_pvec = prev - &reforming(p1);
+                        sink.add(&d2::QuadraticBezierSegment { point1: reforming2(p1), point2: *transmute_safe(&prev) });
+                    },
+                    Segment::SmoothCurveTo(ref p2, ref p3) =>
+                    {
+                        let p1 = prev + &last_curve_pvec;
+                        let p2 = prev + &reforming(p2); prev = prev + &reforming(p3);
+                        last_curve_pvec = prev - &p2;
+                        sink.add(&d2::BezierSegment
+                        {
+                            point1: *transmute_safe(&p1), point2: *transmute_safe(&p2), point3: *transmute_safe(&prev)
+                        });
+                    },
+                    Segment::SmoothCurveToAbs(ref p2, ref p3) =>
+                    {
+                        let p1 = prev + &last_curve_pvec;
+                        prev = reforming(p3); last_curve_pvec = prev - &reforming(p2);
+                        sink.add(&d2::BezierSegment { point1: *transmute_safe(&p1), point2: reforming2(p2), point3: *transmute_safe(&prev) });
+                    },
+                    Segment::SmoothQuadCurveTo(ref p2) =>
+                    {
+                        let p1 = prev + &last_curve_pvec; prev = prev + &reforming(p2);
+                        last_curve_pvec = prev - &p1;
+                        sink.add(&d2::QuadraticBezierSegment { point1: *transmute_safe(&p1), point2: *transmute_safe(&prev) });
+                    },
+                    Segment::SmoothQuadCurveToAbs(ref p2) =>
+                    {
+                        let p1 = prev + &last_curve_pvec;
+                        prev = reforming(p2); last_curve_pvec = prev - &p1;
+                        sink.add(&d2::QuadraticBezierSegment { point1: *transmute_safe(&p1), point2: *transmute_safe(&prev) });
+                    },
+                    Segment::ArcTo { ref size, xrot, large_arc, sweep, ref to } =>
+                    {
+                        prev = prev + &reforming(to);
+                        sink.add(&d2::ArcSegment
+                        {
+                            point: *transmute_safe(&prev), size: d2::SizeF { width: size.0 as _, height: size.1 as _ },
+                            rotationAngle: xrot as _, arcSize: if large_arc { d2::ArcSize::Large } else { d2::ArcSize::Small } as _,
+                            sweepDirection: if sweep == ArcSweepingDirection::CW { d2::SweepDirection::CW } else { d2::SweepDirection::CCW } as _
+                        });
+                    },
+                    Segment::ArcToAbs { ref size, xrot, large_arc, sweep, ref to } =>
+                    {
+                        prev = reforming(to);
+                        sink.add(&d2::ArcSegment
+                        {
+                            point: *transmute_safe(&prev), size: d2::SizeF { width: size.0 as _, height: size.1 as _ },
+                            rotationAngle: xrot as _, arcSize: if large_arc { d2::ArcSize::Large } else { d2::ArcSize::Small } as _,
+                            sweepDirection: if sweep == ArcSweepingDirection::CW { d2::SweepDirection::CW } else { d2::SweepDirection::CCW } as _
+                        });
+                    },
+                    Segment::Close =>
                     {
                         assert!(!closed); closed = true;
                         sink.end_figure(true);
@@ -145,5 +165,5 @@ impl RenderDevice
         sink.close();
 
         Ok(PathImage { inner: p })
-    }
+    }*/
 }

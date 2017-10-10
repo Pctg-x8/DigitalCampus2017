@@ -5,7 +5,7 @@ extern crate ferrite;
 extern crate ws_common;
 #[cfg(windows)] extern crate winapi;
 extern crate flate2;
-extern crate svgdom;
+extern crate svgparser;
 
 #[cfg(windows)] extern crate metrics;
 #[cfg(windows)] extern crate comdrive;
@@ -19,28 +19,8 @@ use render::RenderDevice;
 
 #[cfg(windows)] mod imaging;
 
-#[derive(Debug)]
-pub enum SVGLoaderError { IO(std::io::Error), DOM(svgdom::Error) }
-impl From<std::io::Error> for SVGLoaderError { fn from(e: std::io::Error) -> Self { SVGLoaderError::IO(e) } }
-impl From<svgdom::Error> for SVGLoaderError { fn from(e: svgdom::Error) -> Self { SVGLoaderError::DOM(e) } }
-
 use std::io::prelude::*;
-pub struct SVGLoader {}
-impl SVGLoader
-{
-    pub fn load<P: AsRef<std::path::Path> + ?Sized>(path: &P) -> Result<svgdom::Document, SVGLoaderError>
-    {
-        let fp = std::fs::File::open(path)?;
-        let mut raw_data = String::new();
-        if let Ok(mut gzr) = flate2::read::GzDecoder::new(fp)
-        {
-            gzr.read_to_string(&mut raw_data)?;
-        }
-        else { unimplemented!("read svg"); }
-        svgdom::Document::from_str(&raw_data).map_err(From::from)
-    }
-}
-
+use svgparser::Tokenize;
 pub struct WelcomeSceneRender
 {
     
@@ -49,28 +29,25 @@ impl WelcomeSceneRender
 {
     pub fn new() -> Self
     {
-        let logo_svg = SVGLoader::load("assets/logo_ColoredLogo.svgz").expect("Failed to load the university logo");
-        let path_groups = logo_svg.descendants().find(|n| *n.id() == "枠").unwrap().first_child().unwrap()
-            .children().filter(|n| n.tag_id() == Some(svgdom::ElementId::G));
-        /*for p in path_groups.flat_map(|g| g.children().filter(|n| n.tag_id() == Some(svgdom::ElementId::Path)))
+        let mut fp = std::fs::File::open("assets/logo_ColoredLogo.svgz").and_then(flate2::read::GzDecoder::new)
+            .expect("Failed to load the university logo");
+        let mut content = String::with_capacity(fp.get_mut().metadata().unwrap().len() as _); fp.read_to_string(&mut content).unwrap();
+        for t in &mut svgparser::svg::Tokenizer::from_str(&content).tokens()
         {
-            println!("- {:?}", p);
-            if let svgdom::AttributeValue::Path(ref pd) = p.attributes().get(svgdom::AttributeId::D).unwrap().value
+            match t
             {
-                for segment in &pd.d { println!("-- {:?}", segment); }
+                n => println!("? {:?}", n)
             }
-            else { unreachable!(); }
-        }*/
-        let mut paths = path_groups.flat_map(|g| g.children().filter(|n| n.tag_id() == Some(svgdom::ElementId::Path)));
-        let iter = paths.map(|ref p|
+        }
+        /*let logo_svg = SVGLoader::load("assets/logo_ColoredLogo.svgz").expect("Failed to load the university logo");
+        let path_groups = logo_svg.descendants().find(|n| n.id() == Some("枠")).unwrap().children()[0]
+            .children().iter().filter(|n| n.match_name("g"));
+        let mut paths = path_groups.flat_map(|g| g.children().iter().filter(|n| n.match_name("path")));
+        let iter = paths.map(|p|
         {
-            if let &svgdom::AttributeValue::Path(ref pd) = p.attributes().get_value(svgdom::AttributeId::D).unwrap()
-            {
-                pd.d.iter()
-            }
-            else { unreachable!(); }
+            if let Some(d) = p.path_data() { d.iter() } else { unreachable!(); }
         });
-        let logo = RenderDevice::get().realize_svg_segments(iter).expect("Failed to realize the svg");
+        let logo = RenderDevice::get().realize_svg_segments(iter).expect("Failed to realize the svg");*/
         WelcomeSceneRender {}
     }
 }
