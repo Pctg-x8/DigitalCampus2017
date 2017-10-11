@@ -73,8 +73,10 @@ impl WelcomeSceneRender
             .expect("Failed to load the university logo");
         let mut content = String::with_capacity(fp.get_mut().metadata().unwrap().len() as _); fp.read_to_string(&mut content).unwrap();
         let paths = svgparse_strip_all_path(svgparser::svg::Tokenizer::from_str(&content).tokens()).expect("Error parsing svg");
-        println!("{:?}", paths);
+        // println!("{:?}", paths);
         let logo = RenderDevice::get().realize_svg_segments(paths.iter().map(|x| x.segments.iter())).expect("Failed to realize the svg");
+        RenderDevice::get().do_render(|| ()).unwrap();
+
         /*let logo_svg = SVGLoader::load("assets/logo_ColoredLogo.svgz").expect("Failed to load the university logo");
         let path_groups = logo_svg.descendants().find(|n| n.id() == Some("枠")).unwrap().children()[0]
             .children().iter().filter(|n| n.match_name("g"));

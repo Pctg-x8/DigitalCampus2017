@@ -40,3 +40,4 @@ features = ["FeImplements", "FePresentation", "VK_KHR_win32_surface"]
 [target.'cfg(windows)'.dependencies.winapi]
 git = "https://github.com/retep998/winapi-rs"
 branch = "dev"
+features = ["handleapi", "synchapi"]

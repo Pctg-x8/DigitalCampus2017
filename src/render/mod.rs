@@ -45,4 +45,17 @@ impl RenderDevice
             &RenderDevice::Vulkan(ref v) => unimplemented!()
         }
     }
+    pub fn do_render<F: FnOnce()>(&self, f: F) -> Result<(), Box<Error>>
+    {
+        match *self
+        {
+            RenderDevice::DirectX12(ref d) =>
+            {
+                let findex = d.begin_render()?;
+                f();
+                d.end_render(findex)?; Ok(())
+            },
+            RenderDevice::Vulkan(_) => unimplemented!()
+        }
+    }
 }
