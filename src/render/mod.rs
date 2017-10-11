@@ -1,6 +1,8 @@
 
 mod vk;
 #[cfg(windows)] mod d3d12;
+use svgparser::path::Token as Segment;
+use std::error::Error;
 
 pub trait VectorImage {}
 
@@ -34,7 +36,7 @@ impl RenderDevice
         }
     }
 
-    /*pub fn realize_svg_segments<'a, Iter: Iterator>(&self, provider: Iter) -> Result<Box<VectorImage>, Box<Error>> where
+    pub fn realize_svg_segments<'a, Iter: Iterator>(&self, provider: Iter) -> Result<Box<VectorImage>, Box<Error>> where
         Iter::Item: Iterator<Item = &'a Segment>
     {
         match self
@@ -42,5 +44,5 @@ impl RenderDevice
             &RenderDevice::DirectX12(ref d) => d.realize_svg_segments(provider).map(|x| Box::new(x) as _).map_err(From::from),
             &RenderDevice::Vulkan(ref v) => unimplemented!()
         }
-    }*/
+    }
 }

@@ -19,6 +19,46 @@ use render::RenderDevice;
 
 #[cfg(windows)] mod imaging;
 
+#[derive(Debug, Clone, PartialEq)]
+struct PathSegment { fill: Option<svgparser::Color>, stroke: Option<svgparser::Color>, segments: Vec<svgparser::path::Token> }
+fn svgparse_strip_all_path<'a, Iter: Iterator<Item = svgparser::svg::Token<'a>>>(mut iter: Iter) -> Result<Vec<PathSegment>, svgparser::Error>
+{
+    let mut path = Vec::new();
+    while let Some(t) = iter.next()
+    {
+        match t
+        {
+            svgparser::svg::Token::SvgElementStart(svgparser::ElementId::Path) => path.push(svgparse_strip_path(&mut iter)?),
+            #[cfg(feature = "debug")]
+            t => println!("? {:?}", t),
+            #[cfg(not(feature = "debug"))] _ => ()
+        }
+    }
+    Ok(path)
+}
+fn svgparse_strip_path<'a, Iter: Iterator<Item = svgparser::svg::Token<'a>>>(iter: &mut Iter) -> Result<PathSegment, svgparser::Error>
+{
+    let mut p = PathSegment { fill: None, stroke: None, segments: Vec::new() };
+    while let Some(t) = iter.next()
+    {
+        match t
+        {
+            svgparser::svg::Token::SvgAttribute(id, f) => match id
+            {
+                svgparser::AttributeId::Fill => p.fill = Some(svgparser::Color::from_frame(f)?),
+                svgparser::AttributeId::Stroke => p.stroke = Some(svgparser::Color::from_frame(f)?),
+                svgparser::AttributeId::D => p.segments = svgparser::path::Tokenizer::from_frame(f).tokens().collect(),
+                _ => ()
+            },
+            svgparser::svg::Token::ElementEnd(_) => break,
+            #[cfg(feature = "debug")]
+            t => println!("? {:?}", t),
+            #[cfg(not(feature = "debug"))] _ => ()
+        }
+    }
+    Ok(p)
+}
+
 use std::io::prelude::*;
 use svgparser::Tokenize;
 pub struct WelcomeSceneRender
@@ -32,13 +72,9 @@ impl WelcomeSceneRender
         let mut fp = std::fs::File::open("assets/logo_ColoredLogo.svgz").and_then(flate2::read::GzDecoder::new)
             .expect("Failed to load the university logo");
         let mut content = String::with_capacity(fp.get_mut().metadata().unwrap().len() as _); fp.read_to_string(&mut content).unwrap();
-        for t in &mut svgparser::svg::Tokenizer::from_str(&content).tokens()
-        {
-            match t
-            {
-                n => println!("? {:?}", n)
-            }
-        }
+        let paths = svgparse_strip_all_path(svgparser::svg::Tokenizer::from_str(&content).tokens()).expect("Error parsing svg");
+        println!("{:?}", paths);
+        let logo = RenderDevice::get().realize_svg_segments(paths.iter().map(|x| x.segments.iter())).expect("Failed to realize the svg");
         /*let logo_svg = SVGLoader::load("assets/logo_ColoredLogo.svgz").expect("Failed to load the university logo");
         let path_groups = logo_svg.descendants().find(|n| n.id() == Some("枠")).unwrap().children()[0]
             .children().iter().filter(|n| n.match_name("g"));
