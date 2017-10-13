@@ -29,7 +29,7 @@ git = "https://github.com/Pctg-x8/ws_common_rs"
 
 [features]
 debug = ["ferrite/VK_EXT_debug_report"]
-default = ["target_x11"]
+default = ["target_x11", "debug"]
 target_win32 = ["ferrite/VK_KHR_win32_surface"]
 target_x11 = ["ws_common/target_x11", "ferrite/VK_KHR_xcb_surface"]
 

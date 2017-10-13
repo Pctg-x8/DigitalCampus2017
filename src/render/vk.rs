@@ -4,6 +4,28 @@ use Application;
 use ws_common::WindowServer;
 use ferrite::traits::*;
 #[cfg(feature = "debug")] use libc;
+use metrics::*;
+
+pub struct LazyData<T>(Option<T>);
+impl<T> LazyData<T>
+{
+    pub const INIT: Self = LazyData(None);
+
+    pub fn load<F: FnOnce() -> T>(&self, loader: F) -> &T
+    {
+        if self.0.is_none()
+        {
+            let p = &self.0 as *const _ as *mut _;
+            unsafe { *p = loader(); }
+        }
+        self.0.as_ref().unwrap()
+    }
+    pub fn load_mut<F: FnOnce() -> T>(&mut self, loader: F) -> &mut T
+    {
+        if self.0.is_none() { self.0 = Some(loader()); }
+        self.0.as_mut().unwrap()
+    }
+}
 
 pub struct RenderDevice
 {
@@ -11,7 +33,7 @@ pub struct RenderDevice
     surface: fe::Surface, swapchain: fe::Swapchain, rt_views: Vec<fe::ImageView>,
     #[cfg(feature = "debug")] debug_report: fe::DebugReportCallback,
 
-    agent_str: Option<String>
+    agent_str: LazyData<String>, devprops: LazyData<fe::vk::VkPhysicalDeviceProperties>
 }
 impl RenderDevice
 {
@@ -80,13 +102,13 @@ impl RenderDevice
         { Ok(RenderDevice
         {
             instance, adapter, device, graphics_queue: gq, transfer_queue: tq, surface, swapchain, rt_views: views, debug_report,
-            agent_str: None
+            agent_str: LazyData::INIT, devprops: LazyData::INIT
         }) }
         #[cfg(not(feature = "debug"))]
         { Ok(RenderDevice
         {
             instance, adapter, device, graphics_queue: gq, transfer_queue: tq, surface, swapchain, rt_views: views,
-            agent_str: None
+            agent_str: LazyData::INIT, devprops: LazyData::INIT
         }) }
     }
     #[cfg(feature = "debug")]
@@ -108,15 +130,81 @@ impl RenderDevice
 {
     pub fn agent(&self) -> &str
     {
-        if self.agent_str.is_none()
+        self.agent_str.load(||
         {
             use std::ffi::CStr;
 
-            let p = &self.agent_str as *const _ as *mut _;
-            let adapter_properties = self.adapter.properties();
-            let device_name = unsafe { CStr::from_ptr(adapter_properties.deviceName.as_ptr()) };
-            unsafe { *p = Some(format!("Vulkan {:?}", device_name)); }
-        }
-        self.agent_str.as_ref().unwrap()
+            let adapter_properties = self.devprops.load(|| self.adapter.properties());
+            format!("Vulkan {:?}", unsafe { CStr::from_ptr(adapter_properties.deviceName.as_ptr()) })
+        })
+    }
+    pub fn minimum_uniform_alignment(&self) -> fe::vk::VkDeviceSize
+    {
+        self.devprops.load(|| self.adapter.properties()).limits.minUniformBufferOffsetAlignment
+    }
+
+    pub fn create_resources(&self, buffer_data: &[super::BufferContent], texture_data: &[super::TextureParam]) -> fe::Result<ResourceBlock>
+    {
+        #[derive(Debug)]
+        struct BufferDataPlacement { offset: fe::vk::VkDeviceSize, bytesize: fe::vk::VkDeviceSize, flags: fe::vk::VkBufferUsageFlags }
+        struct TexturePlacement { offset: fe::vk::VkDeviceSize, object: fe::Image }
+        fn alignment(p: fe::vk::VkDeviceSize, a: fe::vk::VkDeviceSize) -> fe::vk::VkDeviceSize { (p / a + 1) * a }
+        let uf_alignment = |p| alignment(p, self.minimum_uniform_alignment());
+        let bdp: Vec<_> = buffer_data.into_iter().scan(0, |current_offset, &super::BufferContent { kind, bytesize }|
+        {
+            let offset = if kind == super::BufferKind::Constant { uf_alignment(*current_offset) } else { *current_offset };
+            *current_offset = offset + bytesize as fe::vk::VkDeviceSize;
+            Some(BufferDataPlacement { offset, bytesize: bytesize as _, flags: kind.translate_vk().0 })
+        }).collect();
+        let buffer_size = bdp.last().map(|b| b.offset + b.bytesize).unwrap_or(0);
+        let buffer = fe::BufferDesc::new(buffer_size as _, fe::BufferUsage(bdp.iter().fold(0, |bits, b| bits | b.flags))).create(&self.device)?;
+        let mut texture_bytes = 0;
+        let tdp: Vec<_> = texture_data.into_iter().scan(0, |current_offset, &super::TextureParam { size, layers, color, render_target }|
+        {
+            let usage = if render_target { fe::ImageUsage::COLOR_ATTACHMENT } else { fe::ImageUsage::SAMPLED.transfer_dest() };
+            Some(fe::ImageDesc::new(fe::Extent2D(size.x(), size.y()), color.translate_vk(), usage, fe::ImageLayout::Preinitialized)
+                .array_layers(layers).create(&self.device).map(|o|
+                {
+                    let req = o.requirements();
+                    let offset = alignment(*current_offset, req.alignment);
+                    *current_offset = offset + req.size;
+                    texture_bytes = *current_offset;
+                    TexturePlacement { offset, object: o }
+                }))
+        }).collect::<fe::Result<_>>()?;
+        // let memory = fe::DeviceMemory::allocate(&self.device, texture_bytes + buffer_size)
+
+        println!("BufferPlacement: {:?}", bdp);
+        unimplemented!();
     }
 }
+
+impl super::BufferKind
+{
+    fn translate_vk(self) -> fe::BufferUsage
+    {
+        match self
+        {
+            super::BufferKind::Vertex => fe::BufferUsage::VERTEX_BUFFER,
+            super::BufferKind::Index => fe::BufferUsage::INDEX_BUFFER,
+            super::BufferKind::Constant => fe::BufferUsage::UNIFORM_BUFFER
+        }
+    }
+}
+impl super::ColorFormat
+{
+    fn translate_vk(self) -> fe::vk::VkFormat
+    {
+        match self
+        {
+            super::ColorFormat::Grayscale => fe::vk::VK_FORMAT_R8_UNORM as _,
+            super::ColorFormat::Default => fe::vk::VK_FORMAT_R8G8B8_UNORM as _,
+            super::ColorFormat::WithAlpha => fe::vk::VK_FORMAT_R8G8B8A8_UNORM as _
+        }
+    }
+}
+pub struct ResourceBlock
+{
+    memory: fe::DeviceMemory, buffer: fe::Buffer, image: Vec<fe::Image>
+}
+impl super::ResourceBlock for ResourceBlock {}

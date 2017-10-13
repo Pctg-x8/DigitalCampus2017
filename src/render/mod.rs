@@ -2,6 +2,7 @@
 mod vk;
 #[cfg(windows)] mod d3d12;
 use std::error::Error;
+use metrics::*;
 
 pub trait VectorImage {}
 
@@ -41,6 +42,15 @@ impl RenderDevice
             &RenderDevice::DirectX12(ref drd12) => drd12.agent()
         }
     }
+    pub fn create_resources(&self, buffer: &[BufferContent], textures: &[TextureParam]) -> Result<Box<ResourceBlock>, Box<Error>>
+    {
+        match self
+        {
+            &RenderDevice::Vulkan(ref vrd) => vrd.create_resources(buffer, textures).map(|x| box x as _).map_err(From::from),
+            #[cfg(windows)]
+            &RenderDevice::DirectX12(ref drd12) => unimplemented!()
+        }
+    }
 
     pub fn do_render<F: FnOnce()>(&self, f: F) -> Result<(), Box<Error>>
     {
@@ -57,3 +67,23 @@ impl RenderDevice
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BufferContent { pub kind: BufferKind, pub bytesize: usize }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BufferKind { Vertex, Index, Constant }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextureParam
+{
+    pub size: Size2U, pub layers: u32, pub color: ColorFormat, pub render_target: bool
+}
+impl Default for TextureParam
+{
+    fn default() -> Self
+    {
+        TextureParam { size: Size2U(1, 1), layers: 1, color: ColorFormat::WithAlpha, render_target: false }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorFormat { Grayscale, Default, WithAlpha }
+pub trait ResourceBlock {}
