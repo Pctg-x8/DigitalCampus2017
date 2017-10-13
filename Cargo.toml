@@ -1,35 +1,49 @@
 [package]
-name = "dc2017"
-version = "0.1.0"
 authors = ["S.Percentage <Syn.Tri.Naga@gmail.com>"]
-publish = false
 build = "build.rs"
-
-[features]
-target_x11 = ["ws_common/target_x11", "ferrite/VK_KHR_xcb_surface"]
-target_win32 = ["ferrite/VK_KHR_win32_surface"]
-debug = ["ferrite/VK_EXT_debug_report"]
-
-# testing
-default = ["target_x11"]
+name = "dc2017"
+publish = false
+version = "0.1.0"
 
 [dependencies]
-appinstance = { git = "https://github.com/Pctg-x8/appinstance" }
+image = "~0.16"
 libc = "0.2"
-ws_common = { git = "https://github.com/Pctg-x8/ws_common_rs", features = ["with_ferrite"] }
-dc_web = { git = "https://github.com/Pctg-x8/DigitalCampus2017P" }
 svgparser = "0.5"
-metrics = { path = "../metrics" }
+
+[dependencies.appinstance]
+git = "https://github.com/Pctg-x8/appinstance"
+
+[dependencies.dc_web]
+git = "https://github.com/Pctg-x8/DigitalCampus2017P"
 
 [dependencies.ferrite]
-git = "https://github.com/Pctg-x8/ferrite"
 features = ["FeImplements", "FePresentation"]
+git = "https://github.com/Pctg-x8/ferrite"
 
-[target.'cfg(windows)'.dependencies]
-comdrive = { path = "../comdrive" }
+[dependencies.metrics]
+path = "../metrics"
+
+[dependencies.ws_common]
+features = ["with_ferrite"]
+git = "https://github.com/Pctg-x8/ws_common_rs"
+
+[features]
+debug = ["ferrite/VK_EXT_debug_report"]
+default = ["target_x11"]
+target_win32 = ["ferrite/VK_KHR_win32_surface"]
+target_x11 = ["ws_common/target_x11", "ferrite/VK_KHR_xcb_surface"]
+
+[target]
+
+[target."cfg(windows)"]
+
+[target."cfg(windows)".dependencies]
 widestring = "0.2"
 
-[target.'cfg(windows)'.dependencies.winapi]
-git = "https://github.com/retep998/winapi-rs"
+[target."cfg(windows)".dependencies.comdrive]
+path = "../comdrive"
+
+[target."cfg(windows)".dependencies.winapi]
 branch = "dev"
 features = ["handleapi", "synchapi"]
+git = "https://github.com/retep998/winapi-rs"

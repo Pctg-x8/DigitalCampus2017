@@ -16,9 +16,8 @@ mod render;
 use render::RenderDevice;
 
 #[cfg(windows)] mod imaging;
+#[cfg(not(windows))] extern crate image;
 
-use std::io::prelude::*;
-use svgparser::Tokenize;
 pub struct WelcomeSceneRender
 {
     
