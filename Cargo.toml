@@ -7,35 +7,27 @@ build = "build.rs"
 
 [features]
 target_x11 = ["ws_common/target_x11", "ferrite/VK_KHR_xcb_surface"]
+target_win32 = ["ferrite/VK_KHR_win32_surface"]
 debug = ["ferrite/VK_EXT_debug_report"]
 
 # testing
-# default = ["target_x11"]
+default = ["target_x11"]
 
 [dependencies]
 appinstance = { git = "https://github.com/Pctg-x8/appinstance" }
 libc = "0.2"
 ws_common = { git = "https://github.com/Pctg-x8/ws_common_rs", features = ["with_ferrite"] }
 dc_web = { git = "https://github.com/Pctg-x8/DigitalCampus2017P" }
-flate2 = "0.2"
 svgparser = "0.5"
+metrics = { path = "../metrics" }
 
-[target.'cfg(not(windows))'.dependencies]
-harfbuzz-sys = "0.1"
-freetype-sys = "0.3"
-
-[target.'cfg(not(windows))'.dependencies.ferrite]
+[dependencies.ferrite]
 git = "https://github.com/Pctg-x8/ferrite"
 features = ["FeImplements", "FePresentation"]
 
 [target.'cfg(windows)'.dependencies]
-metrics = { path = "../metrics" }
 comdrive = { path = "../comdrive" }
 widestring = "0.2"
-
-[target.'cfg(windows)'.dependencies.ferrite]
-git = "https://github.com/Pctg-x8/ferrite"
-features = ["FeImplements", "FePresentation", "VK_KHR_win32_surface"]
 
 [target.'cfg(windows)'.dependencies.winapi]
 git = "https://github.com/retep998/winapi-rs"
