@@ -4,9 +4,11 @@ build = "build.rs"
 name = "dc2017"
 publish = false
 version = "0.1.0"
+
 [dependencies]
 image = "~0.16"
 libc = "0.2"
+mio = "0.6.10"
 num = "*"
 svgparser = "0.5"
 
@@ -34,7 +36,9 @@ target_win32 = ["ferrite/VK_KHR_win32_surface"]
 target_x11 = ["ws_common/target_x11", "ferrite/VK_KHR_xcb_surface"]
 
 [target]
+
 [target."cfg(windows)"]
+
 [target."cfg(windows)".dependencies]
 widestring = "0.2"
 

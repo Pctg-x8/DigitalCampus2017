@@ -6,6 +6,8 @@ use ferrite::traits::*;
 #[cfg(feature = "debug")] use libc;
 use metrics::*;
 use event::*;
+use std::sync::Arc;
+use std::mem::replace;
 
 pub struct LazyData<T>(Option<T>);
 impl<T> LazyData<T>
@@ -257,13 +259,45 @@ pub struct ResourceBlock
 }
 impl super::ResourceBlock for ResourceBlock {}
 
-pub struct RenderControl { th: ::std::thread::Thread, ev_queue_render: Box<Event>, ev_render_ready: Box<Event> }
+pub struct RenderControl
+{
+    th: Option<::std::thread::JoinHandle<()>>, fence: Arc<fe::Fence>,
+    ev_queue_render: Event, ev_render_ready: Event, ev_thread_exit: Event
+}
 impl RenderControl
 {
     fn init(device: &fe::Device) -> Self
     {
-        let semaphore = fe::Semaphore::new(device).expect("Failed to create a semaphore");
+        let fence = Arc::new(fe::Fence::new(device, false).expect("Failed to create a fence"));
+        let fence_th = fence.clone();
+        let (ev_queue_render, ev_render_ready, ev_thread_exit) = (Event::new(), Event::new(), Event::new());
+        let (eqr_s, err_s, ete_s) = (ev_queue_render.share_inner(), ev_render_ready.share_inner(), ev_thread_exit.share_inner());
         // let ev_queue_render = box 
-        RenderControl { semaphore }
+        RenderControl
+        {
+            th: Some(::std::thread::Builder::new().name("RenderControl Fence Observer".into()).spawn(move ||
+            {
+                let (ev_queue_render, ev_render_ready, ev_thread_exit) = (eqr_s, err_s, ete_s);
+
+                'mlp: loop
+                {
+                    loop
+                    {
+                        match Event::wait_any(&[&ev_queue_render, &ev_thread_exit])
+                        {
+                            Some(1) => break 'mlp, Some(0) => break, _ => ()
+                        }
+                    }
+                    fence_th.wait() .expect("Failure while waiting a fence to be signaled");
+                    fence_th.reset().expect("Failed to reset a fence");
+                    ev_render_ready.set();
+                }
+            }).expect("Failed to spawn an observer thread")), fence,
+            ev_queue_render, ev_render_ready, ev_thread_exit
+        }
     }
+}
+impl Drop for RenderControl
+{
+    fn drop(&mut self) { self.ev_thread_exit.set(); replace(&mut self.th, None).unwrap().join().unwrap(); }
 }

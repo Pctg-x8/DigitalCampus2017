@@ -12,6 +12,7 @@ extern crate metrics;
 #[cfg(windows)] extern crate widestring;
 #[cfg(windows)] use comdrive::ResultCarrier;
 extern crate num;
+extern crate mio;
 
 use ws_common::{NativeWindow, WindowServer};
 
