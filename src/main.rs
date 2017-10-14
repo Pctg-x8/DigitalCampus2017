@@ -11,12 +11,14 @@ extern crate metrics;
 #[cfg(windows)] extern crate comdrive;
 #[cfg(windows)] extern crate widestring;
 #[cfg(windows)] use comdrive::ResultCarrier;
+extern crate num;
 
 use ws_common::{NativeWindow, WindowServer};
 
 mod render;
 use render::{RenderDevice, TextureParam, ColorFormat};
 use metrics::*;
+mod event;
 
 #[cfg(windows)] mod imaging;
 #[cfg(not(windows))] extern crate image;
@@ -35,7 +37,7 @@ impl WelcomeSceneRender
         let (w, h) = p_logo_encoded.dimensions();
         println!("The university logo loaded: size = {}x{} estimatedSize = {} bytes", w, h, w * h);
         let res = RenderDevice::get().create_resources(&[], &[
-            TextureParam { size: Size2U(w, h), color: ColorFormat::Grayscale, .. Default::default() }
+            TextureParam { size: Size2U(w, h), color: ColorFormat::Grayscale, require_staging: true, .. Default::default() }
         ]).expect("Failed to create some resources");
         RenderDevice::get().do_render(|| ()).unwrap();
         WelcomeSceneRender {}

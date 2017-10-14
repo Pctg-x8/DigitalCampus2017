@@ -75,13 +75,13 @@ pub enum BufferKind { Vertex, Index, Constant }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextureParam
 {
-    pub size: Size2U, pub layers: u32, pub color: ColorFormat, pub render_target: bool
+    pub size: Size2U, pub layers: u32, pub color: ColorFormat, pub render_target: bool, pub require_staging: bool
 }
 impl Default for TextureParam
 {
     fn default() -> Self
     {
-        TextureParam { size: Size2U(1, 1), layers: 1, color: ColorFormat::WithAlpha, render_target: false }
+        TextureParam { size: Size2U(1, 1), layers: 1, color: ColorFormat::WithAlpha, render_target: false, require_staging: false }
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

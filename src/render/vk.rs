@@ -5,6 +5,7 @@ use ws_common::WindowServer;
 use ferrite::traits::*;
 #[cfg(feature = "debug")] use libc;
 use metrics::*;
+use event::*;
 
 pub struct LazyData<T>(Option<T>);
 impl<T> LazyData<T>
@@ -27,13 +28,14 @@ impl<T> LazyData<T>
     }
 }
 
+pub struct MemoryIndices { devlocal: u32, host: u32 }
 pub struct RenderDevice
 {
     instance: fe::Instance, adapter: fe::PhysicalDevice, device: fe::Device, graphics_queue: (u32, fe::Queue), transfer_queue: (u32, fe::Queue),
     surface: fe::Surface, swapchain: fe::Swapchain, rt_views: Vec<fe::ImageView>,
     #[cfg(feature = "debug")] debug_report: fe::DebugReportCallback,
 
-    agent_str: LazyData<String>, devprops: LazyData<fe::vk::VkPhysicalDeviceProperties>
+    agent_str: LazyData<String>, devprops: LazyData<fe::vk::VkPhysicalDeviceProperties>, memindices: MemoryIndices, render_control: RenderControl
 }
 impl RenderDevice
 {
@@ -55,9 +57,13 @@ impl RenderDevice
         let queue_families = adapter.queue_family_properties();
         let graphics_qf = queue_families.find_matching_index(fe::QueueFlags::GRAPHICS).expect("Failed to find graphics queue family");
         let transfer_qf = queue_families.find_another_matching_index(fe::QueueFlags::TRANSFER, graphics_qf).unwrap_or(graphics_qf);
-        let queues =
-            if graphics_qf != transfer_qf { vec![fe::DeviceQueueCreateInfo(graphics_qf, vec![0.0]), fe::DeviceQueueCreateInfo(transfer_qf, vec![0.0])] }
-            else { vec![fe::DeviceQueueCreateInfo(graphics_qf, vec![0.0; 2])] };
+        let (gq_count, queues) =
+            if graphics_qf != transfer_qf { (1, vec![fe::DeviceQueueCreateInfo(graphics_qf, vec![0.0]), fe::DeviceQueueCreateInfo(transfer_qf, vec![0.0])]) }
+            else
+            {
+                let c = ::std::cmp::min(2, queue_families.queue_count(graphics_qf));
+                (c, vec![fe::DeviceQueueCreateInfo(graphics_qf, vec![0.0; c as usize])])
+            };
         let device =
         {
             let devbuilder = fe::DeviceBuilder::new(&adapter)
@@ -67,7 +73,7 @@ impl RenderDevice
             devbuilder.add_queues(queues).create().expect("Failed to create device")
         };
         let gq = (graphics_qf, device.queue(graphics_qf, 0));
-        let tq = (transfer_qf, device.queue(transfer_qf, if graphics_qf == transfer_qf { 1 } else { 0 }));
+        let tq = (transfer_qf, device.queue(transfer_qf, if graphics_qf == transfer_qf { ::std::cmp::min(1, gq_count - 1) } else { 0 }));
 
         let ref target = Application::instance().main_window;
         if !WindowServer::instance().presentation_support(&adapter, graphics_qf)
@@ -98,17 +104,26 @@ impl RenderDevice
             aspect_mask: fe::AspectMask::COLOR, mip_levels: 0 .. 1, array_layers: 0 .. 1
         })).collect::<Result<Vec<_>, _>>().expect("Failed to create views to each swapchain buffers");
 
+        let memprops = adapter.memory_properties();
+        let memindices = MemoryIndices
+        {
+            devlocal: memprops.find_device_local_index().expect("Unable to find a memory index which is device local"),
+            host: memprops.find_host_visible_index().expect("Unable to find a memory index which can be visibled from the host")
+        };
+
         #[cfg(feature = "debug")]
         { Ok(RenderDevice
         {
+            render_control: RenderControl::init(&device),
             instance, adapter, device, graphics_queue: gq, transfer_queue: tq, surface, swapchain, rt_views: views, debug_report,
-            agent_str: LazyData::INIT, devprops: LazyData::INIT
+            agent_str: LazyData::INIT, devprops: LazyData::INIT, memindices
         }) }
         #[cfg(not(feature = "debug"))]
         { Ok(RenderDevice
         {
+            render_control: RenderControl::init(&device),
             instance, adapter, device, graphics_queue: gq, transfer_queue: tq, surface, swapchain, rt_views: views,
-            agent_str: LazyData::INIT, devprops: LazyData::INIT
+            agent_str: LazyData::INIT, devprops: LazyData::INIT, memindices
         }) }
     }
     #[cfg(feature = "debug")]
@@ -147,7 +162,6 @@ impl RenderDevice
     {
         #[derive(Debug)]
         struct BufferDataPlacement { offset: fe::vk::VkDeviceSize, bytesize: fe::vk::VkDeviceSize, flags: fe::vk::VkBufferUsageFlags }
-        struct TexturePlacement { offset: fe::vk::VkDeviceSize, object: fe::Image }
         fn alignment(p: fe::vk::VkDeviceSize, a: fe::vk::VkDeviceSize) -> fe::vk::VkDeviceSize { (p / a + 1) * a }
         let uf_alignment = |p| alignment(p, self.minimum_uniform_alignment());
         let bdp: Vec<_> = buffer_data.into_iter().scan(0, |current_offset, &super::BufferContent { kind, bytesize }|
@@ -157,11 +171,20 @@ impl RenderDevice
             Some(BufferDataPlacement { offset, bytesize: bytesize as _, flags: kind.translate_vk().0 })
         }).collect();
         let buffer_size = bdp.last().map(|b| b.offset + b.bytesize).unwrap_or(0);
-        let buffer = fe::BufferDesc::new(buffer_size as _, fe::BufferUsage(bdp.iter().fold(0, |bits, b| bits | b.flags))).create(&self.device)?;
-        let mut texture_bytes = 0;
-        let tdp: Vec<_> = texture_data.into_iter().scan(0, |current_offset, &super::TextureParam { size, layers, color, render_target }|
+        let (buffer, sbuffer) = if buffer_size > 0
         {
-            let usage = if render_target { fe::ImageUsage::COLOR_ATTACHMENT } else { fe::ImageUsage::SAMPLED.transfer_dest() };
+            let buffer_usage = fe::BufferUsage(bdp.iter().fold(0, |bits, b| bits | b.flags));
+            let buffer = fe::BufferDesc::new(buffer_size as _, buffer_usage).create(&self.device)?;
+            let sbuffer = fe::BufferDesc::new(buffer_size as _, buffer_usage).create(&self.device)?;
+            (Some(buffer), Some(sbuffer))
+        }
+        else { (None, None) };
+        let (bufalloc, sbufalloc) = (buffer.as_ref().map(MemoryBound::requirements), sbuffer.as_ref().map(MemoryBound::requirements));
+        let mut texture_bytes = 0;
+        let tdp: Vec<_> = texture_data.into_iter().scan(0, |current_offset, &super::TextureParam { size, layers, color, render_target, require_staging }|
+        {
+            let mut usage = if render_target { fe::ImageUsage::COLOR_ATTACHMENT } else { fe::ImageUsage::SAMPLED };
+            if require_staging { usage = usage.transfer_dest(); }
             Some(fe::ImageDesc::new(fe::Extent2D(size.x(), size.y()), color.translate_vk(), usage, fe::ImageLayout::Preinitialized)
                 .array_layers(layers).create(&self.device).map(|o|
                 {
@@ -172,10 +195,33 @@ impl RenderDevice
                     TexturePlacement { offset, object: o }
                 }))
         }).collect::<fe::Result<_>>()?;
-        // let memory = fe::DeviceMemory::allocate(&self.device, texture_bytes + buffer_size)
+        let mut stexture_bytes = 0;
+        let tdps: Vec<_> = texture_data.into_iter().filter(|p| p.require_staging && !p.render_target).scan(0, |current_offset, &super::TextureParam { size, layers, color, .. }|
+        {
+            Some(fe::ImageDesc::new(fe::Extent2D(size.x(), size.y()), color.translate_vk(), fe::ImageUsage::TRANSFER_SRC, fe::ImageLayout::Preinitialized)
+                .use_linear_tiling().array_layers(layers).create(&self.device).map(|o|
+                {
+                    let req = o.requirements();
+                    let offset = alignment(*current_offset, req.alignment);
+                    *current_offset = offset + req.size;
+                    stexture_bytes = *current_offset;
+                    TexturePlacement { offset, object: o }
+                }))
+        }).collect::<fe::Result<_>>()?;
+        let buffer_base = alignment(texture_bytes, bufalloc.map(|x| x.alignment).unwrap_or(1));
+        let sbuffer_base = alignment(stexture_bytes, sbufalloc.map(|x| x.alignment).unwrap_or(1));
+        let memory = fe::DeviceMemory::allocate(&self.device, (buffer_base + buffer_size) as _, self.memindices.devlocal)?;
+        let smemory = fe::DeviceMemory::allocate(&self.device, (sbuffer_base + buffer_size) as _, self.memindices.host)?;
+        if let Some(ref b) = buffer.as_ref() { b.bind(&memory, buffer_base as _)?; }
+        if let Some(ref b) = sbuffer.as_ref() { b.bind(&smemory, sbuffer_base as _)?; }
+        let mut image = Vec::with_capacity(tdp.len());
+        for TexturePlacement { object, offset } in tdp
+        {
+            object.bind(&memory, offset as _)?; image.push(object);
+        }
+        for &TexturePlacement { ref object, offset } in &tdps { object.bind(&smemory, offset as _)?; }
 
-        println!("BufferPlacement: {:?}", bdp);
-        unimplemented!();
+        Ok(ResourceBlock { memory, smemory, buffer, sbuffer, image, simage: tdps })
     }
 }
 
@@ -203,8 +249,21 @@ impl super::ColorFormat
         }
     }
 }
+pub struct TexturePlacement { offset: fe::vk::VkDeviceSize, object: fe::Image }
 pub struct ResourceBlock
 {
-    memory: fe::DeviceMemory, buffer: fe::Buffer, image: Vec<fe::Image>
+    memory: fe::DeviceMemory, smemory: fe::DeviceMemory, buffer: Option<fe::Buffer>, sbuffer: Option<fe::Buffer>,
+    image: Vec<fe::Image>, simage: Vec<TexturePlacement>
 }
 impl super::ResourceBlock for ResourceBlock {}
+
+pub struct RenderControl { th: ::std::thread::Thread, ev_queue_render: Box<Event>, ev_render_ready: Box<Event> }
+impl RenderControl
+{
+    fn init(device: &fe::Device) -> Self
+    {
+        let semaphore = fe::Semaphore::new(device).expect("Failed to create a semaphore");
+        // let ev_queue_render = box 
+        RenderControl { semaphore }
+    }
+}
