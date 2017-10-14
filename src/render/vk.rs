@@ -225,6 +225,17 @@ impl RenderDevice
 
         Ok(ResourceBlock { memory, smemory, buffer, sbuffer, image, simage: tdps })
     }
+
+    pub fn begin_render(&self, wait: bool) -> fe::Result<Option<()>>
+    {
+        let exec_render = if wait { self.render_control.wait_last_render_completion()?; true }
+        else { self.render_control.check_last_render_completion()? };
+        if !exec_render { Ok(None) }
+        else
+        {
+            // TODO: impl here
+        }
+    }
 }
 
 impl super::BufferKind
@@ -295,6 +306,21 @@ impl RenderControl
             }).expect("Failed to spawn an observer thread")), fence,
             ev_queue_render, ev_render_ready, ev_thread_exit
         }
+    }
+
+    pub fn check_last_render_completion(&self) -> fe::Result<bool>
+    {
+        if !self.fence.status()?
+        {
+            self.ev_queue_render.set();
+            Ok(false)
+        }
+        else { Ok(true) }
+    }
+    pub fn wait_last_render_completion(&self) -> fe::Result<()>
+    {
+        if !self.check_last_render_completion()? { self.ev_render_ready.wait(); }
+        Ok(())
     }
 }
 impl Drop for RenderControl
