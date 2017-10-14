@@ -23,11 +23,11 @@ impl Event
 		#[cfg(windows)] unsafe { ::winapi::um::handleapi::SetEvent(self.1); }
 		#[cfg(unix)] unsafe { let inc: u64 = 1; ::libc::write(self.1, ::std::mem::transmute::<_, *const _>(&inc), 8); }
 	}
-	pub fn wait(&self)
+	/*pub fn wait(&self)
 	{
 		#[cfg(windows)] unsafe { ::winapi::um::synchapi::WaitForSingleObject(self.1, ::winapi::um::synchapi::INFINITE); }
-		#[cfg(unix)] unsafe { let mut inc: [u8; 8] = [0; 8]; ::libc::read(self.1, inc.as_ptr() as _, 8); }
-	}
+		#[cfg(unix)] unsafe { let inc: [u8; 8] = [0; 8]; ::libc::read(self.1, inc.as_ptr() as _, 8); }
+	}*/
 
 	#[cfg(unix)]
 	pub fn wait_any(events: &[&Self]) -> Option<usize>
