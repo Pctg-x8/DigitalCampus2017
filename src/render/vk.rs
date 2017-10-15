@@ -9,6 +9,8 @@ use event::*;
 use std::sync::Arc;
 use std::mem::replace;
 use std::error::Error;
+use std::borrow::Cow;
+use std::ops::Deref;
 
 const APPNAME: &'static str = "dc2017";
 
@@ -108,9 +110,9 @@ impl RenderDeviceCore
         println!("[debug_call]{:?}", unsafe { CStr::from_ptr(message) }); fe::vk::VK_FALSE
     }
 }
-impl Drop for RenderDeviceCore
+impl Drop for RenderDevice
 {
-    fn drop(&mut self) { self.device.wait().unwrap(); }
+    fn drop(&mut self) { RenderDeviceCore::get().device.wait().unwrap(); }
 }
 
 pub struct MemoryIndices { devlocal: u32, host: u32 }
@@ -118,7 +120,7 @@ pub struct RenderDevice
 {
     surface: fe::Surface, swapchain: fe::Swapchain, rt_views: Vec<fe::ImageView>,
     render_control: RenderControl, primary_rt_pass: fe::RenderPass, rtsc: Vec<fe::Framebuffer>,
-    rtcp: fe::CommandPool, rtcmds: Vec<fe::CommandBuffer>
+    rtcp: fe::CommandPool, rtcmds: Vec<fe::CommandBuffer>, buffer_ready: fe::Semaphore, present_ready: fe::Semaphore
 }
 impl RenderDevice
 {
@@ -173,8 +175,9 @@ impl RenderDevice
         #[cfg(feature = "debug")]
         Ok(RenderDevice
         {
-            render_control: RenderControl::init(&core.device), surface, swapchain, rt_views: views, primary_rt_pass, rtsc,
-            rtcp, rtcmds
+            render_control: RenderControl::init(&core.device, &swapchain), surface, swapchain, rt_views: views, primary_rt_pass, rtsc,
+            rtcp, rtcmds, buffer_ready: fe::Semaphore::new(&core.device).expect("Failed to create a semaphore(buffer_ready)"),
+            present_ready: fe::Semaphore::new(&core.device).expect("Failed to create a semaphore(present_ready)")
         })
     }
 }
@@ -290,17 +293,29 @@ impl RenderDevice
         Ok(RenderTarget(rp, fb, optimized_clear))
     }*/
 
-    pub fn swapchain_buffer_count(&self) -> usize { self.rtsc.len() }
-    pub fn begin_render(&self, wait: bool) -> fe::Result<Option<()>>
+    // pub fn swapchain_buffer_count(&self) -> usize { self.rtsc.len() }
+    pub fn do_render(&self) -> fe::Result<bool>
     {
-        let exec_render = if wait { self.render_control.wait_last_render_completion()?; true }
-        else { self.render_control.check_last_render_completion()? };
-        if !exec_render { Ok(None) }
+        if let Some(next) = self.render_control.check_ready_next()?
+        {
+            RenderDeviceCore::get().graphics_queue.1.submit(&[fe::SubmissionBatch
+            {
+                command_buffers: Cow::Borrowed(&[&self.rtcmds[next as usize]]),
+                signal_semaphores: Cow::Borrowed(&[(&self.present_ready)]),
+                .. Default::default()
+            }], None)?;
+            RenderDeviceCore::get().graphics_queue.1.present(&[(&self.swapchain, next)], &[&self.present_ready])?;
+            self.render_control.begin_acquire_next();
+            Ok(true)
+        }
         else
         {
-            // TODO: impl here
-            unimplemented!();
+            Ok(false)
         }
+    }
+    pub fn wait_render_ready(&self) -> fe::Result<()>
+    {
+        self.render_control.wait_last_render_completion().map(drop)
     }
 
     pub fn new_render_command_buffer(&self, count: usize) -> fe::Result<RenderCommands>
@@ -399,66 +414,88 @@ impl RenderTarget
         match *self
         {
             RenderTarget::Owned(_, _, ref o) => o.as_ref(),
-            RenderTarget::PrimaryRT(_) => Some(&Color(0.0, 0.0, 0.0, 0.0))
+            RenderTarget::PrimaryRT(_) => Some(&Color(0.0, 0.0, 0.0, 0.5))
         }
     }
 }
 
+use std::sync::atomic::{Ordering, AtomicUsize, AtomicBool};
 pub struct RenderControl
 {
-    th: Option<::std::thread::JoinHandle<()>>, fence: Arc<fe::Fence>,
-    ev_queue_render: Event, ev_render_ready: Event, ev_thread_exit: Event
+    th: Option<::std::thread::JoinHandle<()>>,
+    next_index: Arc<AtomicUsize>, render_ready_flag: Arc<AtomicBool>,
+    ev_acquire_next: Event, ev_render_ready: Event, ev_thread_exit: Event
 }
 impl RenderControl
 {
-    fn init(device: &fe::Device) -> Self
+    fn acquire_next_image_sync(sc: Option<&fe::Swapchain>, fence: &fe::Fence) -> fe::Result<u32>
     {
-        let fence = Arc::new(fe::Fence::new(device, false).expect("Failed to create a fence"));
-        let fence_th = fence.clone();
-        let (ev_queue_render, ev_render_ready, ev_thread_exit) = (Event::new(), Event::new(), Event::new());
-        let (eqr_s, err_s, ete_s) = (ev_queue_render.share_inner(), ev_render_ready.share_inner(), ev_thread_exit.share_inner());
+        let sc = sc.unwrap_or_else(|| &super::RenderDevice::get().ensure_vk().swapchain);
+        let next = sc.acquire_next(None, None, Some(fence))?;
+        fence.wait()?; fence.reset()?;
+        Ok(next)
+    }
+
+    fn init(device: &fe::Device, swapchain: &fe::Swapchain) -> Self
+    {
+        let render_ready = fe::Fence::new(device, false).expect("Failed to create a fence");
+        let render_ready_flag = Arc::new(AtomicBool::new(true));
+        let rrf_th = render_ready_flag.clone();
+        let (ev_acquire_next, ev_render_ready, ev_thread_exit) = (Event::new(), Event::new(), Event::new());
+        let (ean_s, err_s, ete_s) = (ev_acquire_next.share_inner(), ev_render_ready.share_inner(), ev_thread_exit.share_inner());
+        let next_index = Arc::new(AtomicUsize::new(Self::acquire_next_image_sync(Some(swapchain), &render_ready)
+            .expect("Failure while acquiring initial index of buffer") as _));
+        let ni_th = next_index.clone();
+        #[cfg(feature = "debug")] println!("Initial Index: {}", next_index.load(Ordering::Acquire));
         RenderControl
         {
             th: Some(::std::thread::Builder::new().name("RenderControl Fence Observer".into()).spawn(move ||
             {
-                let (ev_queue_render, ev_render_ready, ev_thread_exit) = (eqr_s, err_s, ete_s);
+                let (ev_acquire_next, ev_render_ready, ev_thread_exit) = (ean_s, err_s, ete_s);
+                let render_ready_flag = rrf_th;
 
                 'mlp: loop
                 {
+                    #[cfg(feature = "debug")] println!("[RenderControl] waiting to begin acquire_next...");
                     loop
                     {
-                        match Event::wait_any(&[&ev_queue_render, &ev_thread_exit])
-                        {
-                            Some(1) => break 'mlp, Some(0) => break, _ => ()
-                        }
+                        if Event::wait_any(&[&ev_acquire_next, &ev_thread_exit]) == Some(0) { ev_acquire_next.reset(); break; }
+                        else { ev_thread_exit.reset(); break 'mlp; }
                     }
-                    fence_th.wait() .expect("Failure while waiting a fence to be signaled");
-                    fence_th.reset().expect("Failed to reset a fence");
+                    #[cfg(feature = "debug")] println!("[RenderControl] acquiring next index...");
+                    let next = Self::acquire_next_image_sync(None, &render_ready).expect("Failure while acquiring next index of buffer");
+                    #[cfg(feature = "debug")] println!("[RenderControl] acquired!");
+                    ni_th.store(next as _, Ordering::Release);
+                    render_ready_flag.store(true, Ordering::Release);
                     ev_render_ready.set();
                 }
-            }).expect("Failed to spawn an observer thread")), fence,
-            ev_queue_render, ev_render_ready, ev_thread_exit
+            }).expect("Failed to spawn an observer thread")), next_index,
+            ev_acquire_next, ev_render_ready, ev_thread_exit, render_ready_flag
         }
     }
 
-    pub fn check_last_render_completion(&self) -> fe::Result<bool>
+    pub fn check_ready_next(&self) -> fe::Result<Option<u32>>
     {
-        if !self.fence.status()?
-        {
-            self.ev_queue_render.set();
-            Ok(false)
-        }
-        else { Ok(true) }
+        if !self.render_ready_flag.load(Ordering::Acquire) { Ok(None) }
+        else { Ok(Some(self.next_index.load(Ordering::Acquire) as _)) }
     }
-    pub fn wait_last_render_completion(&self) -> fe::Result<()>
+    pub fn wait_last_render_completion(&self) -> fe::Result<u32>
     {
-        if !self.check_last_render_completion()? { self.ev_render_ready.wait(); }
-        Ok(())
+        if let Some(n) = self.check_ready_next()? { Ok(n) }
+        else { self.ev_render_ready.wait(); self.wait_last_render_completion() }
+    }
+    pub fn begin_acquire_next(&self)
+    {
+        self.render_ready_flag.store(false, Ordering::Release);
+        self.ev_acquire_next.set();
     }
 }
 impl Drop for RenderControl
 {
-    fn drop(&mut self) { self.ev_thread_exit.set(); replace(&mut self.th, None).unwrap().join().unwrap(); }
+    fn drop(&mut self)
+    {
+        self.ev_thread_exit.set(); replace(&mut self.th, None).unwrap().join().unwrap();
+    }
 }
 
 pub struct RenderCommands(fe::CommandPool, Vec<fe::CommandBuffer>);
@@ -479,6 +516,18 @@ impl super::RenderCommands for RenderCommands
 }
 impl<'d> super::RenderCommandsBasic for CommandRecorder<'d>
 {
+    fn prepare_render_targets(&mut self, target: &[&super::RenderTarget])
+    {
+        let targets: Vec<_> = target.iter().map(|&rt| unsafe { &*(rt as *const _ as *const RenderTarget) }.fb().resources()[0].deref().native_ptr()).collect();
+        self.rec.pipeline_barrier(fe::PipelineStageFlags::ALL_COMMANDS, fe::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, false,
+            &[], &[], &targets.iter().map(|&r| fe::vk::VkImageMemoryBarrier
+            {
+                srcAccessMask: fe::vk::VK_ACCESS_MEMORY_READ_BIT, dstAccessMask: fe::vk::VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                oldLayout: fe::ImageLayout::PresentSrc as _, newLayout: fe::ImageLayout::ColorAttachmentOpt as _, image: r,
+                subresourceRange: fe::vk::VkImageSubresourceRange { aspectMask: fe::AspectMask::COLOR.0, .. Default::default() },
+                .. Default::default()
+            }).collect::<Vec<_>>());
+    }
     fn set_render_target(&mut self, target: &super::RenderTarget)
     {
         let target = unsafe { &*(target as *const _ as *const RenderTarget) };

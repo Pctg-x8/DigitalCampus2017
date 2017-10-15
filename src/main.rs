@@ -42,8 +42,10 @@ impl WelcomeSceneRender
         ]).expect("Failed to create some resources");
         RenderDevice::get().update_render_commands(|rec, n|
         {
+            rec.prepare_render_targets(&[&*RenderDevice::get().get_primary_render_target(n)]);
             rec.set_render_target(&*RenderDevice::get().get_primary_render_target(n));
         }).expect("Failed to initialize render commands");
+        RenderDevice::get().do_render().expect("Failed to kick initial render");
         /*let primary_cmds = RenderDevice::get().new_render_command_buffer(RenderDevice::get().swapchain_buffer_count())
             .expect("Failed to generate render command buffers");
         for n in 0 .. RenderDevice::get().swapchain_buffer_count()
@@ -85,9 +87,11 @@ fn main()
         libc::atexit(uninit);
     }
     println!("=== DIGITAL CAMPUS 2017 ===");
+    RenderDevice::init();
     println!("RenderAgent: {}", RenderDevice::get().agent());
     let scene = WelcomeSceneRender::init();
     Application::instance().process_events();
+    RenderDevice::uninit();
 }
 
 #[cfg(windows)]

@@ -28,6 +28,11 @@ impl Event
 		#[cfg(windows)] unsafe { ::winapi::um::synchapi::WaitForSingleObject(self.1, ::winapi::um::synchapi::INFINITE); }
 		#[cfg(unix)] unsafe { let inc: [u8; 8] = [0; 8]; ::libc::read(self.1, inc.as_ptr() as _, 8); }
 	}
+	pub fn reset(&self)
+	{
+		#[cfg(windows)] unsafe { ::winapi::um::handleapi::ResetEvent(self.1); }
+		#[cfg(unix)] self.wait();
+	}
 
 	#[cfg(unix)]
 	pub fn wait_any(events: &[&Self]) -> Option<usize>

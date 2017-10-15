@@ -10,11 +10,17 @@ pub enum RenderDevice
 {
     Vulkan(vk::RenderDevice), #[cfg(windows)] DirectX12(d3d12::RenderDevice)
 }
+static mut RD: *const RenderDevice = 0 as *const _;
 impl RenderDevice
 {
-    AppInstance!(pub static instance: RenderDevice = RenderDevice::new());
     /// Helping RLS completion
-    pub fn get<'a>() -> &'a Self { Self::instance() }
+    pub fn get<'a>() -> &'a Self { unsafe { &*RD } }
+
+    pub fn init()
+    {
+        unsafe { RD = Box::into_raw(box Self::new()); }
+    }
+    pub fn uninit() { unsafe { drop(Box::from_raw(RD as *mut Self)); RD = 0 as *const _; } }
 
     #[cfg(windows)]
     fn new() -> Self
@@ -42,7 +48,7 @@ impl RenderDevice
             &RenderDevice::DirectX12(ref drd12) => drd12.agent()
         }
     }
-    pub fn swapchain_buffer_count(&self) -> usize
+    /*pub fn swapchain_buffer_count(&self) -> usize
     {
         match self
         {
@@ -50,7 +56,7 @@ impl RenderDevice
             #[cfg(windows)]
             &RenderDevice::DirectX12(_) => unimplemented!()
         }
-    }
+    }*/
     pub fn create_resources(&self, buffer: &[BufferContent], textures: &[TextureParam]) -> Result<Box<ResourceBlock>, Box<Error>>
     {
         match self
@@ -97,18 +103,22 @@ impl RenderDevice
         }
     }
 
-    pub fn do_render<F: FnOnce()>(&self, f: F) -> Result<(), Box<Error>>
+    pub fn do_render(&self) -> Result<bool, Box<Error>>
     {
         match *self
         {
-            RenderDevice::Vulkan(_) => unimplemented!(),
+            RenderDevice::Vulkan(ref d) => d.do_render().map_err(From::from),
             #[cfg(windows)]
-            RenderDevice::DirectX12(ref d) =>
-            {
-                let findex = d.begin_render()?;
-                f();
-                d.end_render(findex)?; Ok(())
-            }
+            RenderDevice::DirectX12(ref d) => unimplemented!("need to change")
+        }
+    }
+    pub fn wait_render_ready(&self) -> Result<(), Box<Error>>
+    {
+        match *self
+        {
+            RenderDevice::Vulkan(ref d) => d.wait_render_ready().map_err(From::from),
+            #[cfg(windows)]
+            RenderDevice::DirectX12(ref d) => unimplemented!()
         }
     }
 
@@ -144,6 +154,7 @@ pub trait RenderCommands
 }
 pub trait RenderCommandsBasic
 {
+    fn prepare_render_targets(&mut self, targets: &[&RenderTarget]);
     fn set_render_target(&mut self, target: &RenderTarget);
     fn execute_subcommands_into(&mut self, target: &RenderTarget, subcommands: &[&CommandBuffer]);
 }
