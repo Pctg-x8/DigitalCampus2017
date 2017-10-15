@@ -42,6 +42,15 @@ impl RenderDevice
             &RenderDevice::DirectX12(ref drd12) => drd12.agent()
         }
     }
+    pub fn swapchain_buffer_count(&self) -> usize
+    {
+        match self
+        {
+            &RenderDevice::Vulkan(ref vrd) => vrd.swapchain_buffer_count(),
+            #[cfg(windows)]
+            &RenderDevice::DirectX12(_) => unimplemented!()
+        }
+    }
     pub fn create_resources(&self, buffer: &[BufferContent], textures: &[TextureParam]) -> Result<Box<ResourceBlock>, Box<Error>>
     {
         match self
@@ -49,6 +58,24 @@ impl RenderDevice
             &RenderDevice::Vulkan(ref vrd) => vrd.create_resources(buffer, textures).map(|x| box x as _).map_err(From::from),
             #[cfg(windows)]
             &RenderDevice::DirectX12(ref drd12) => unimplemented!()
+        }
+    }
+    pub fn new_render_command_buffer(&self, count: usize) -> Result<Box<RenderCommands>, Box<Error>>
+    {
+        match self
+        {
+            &RenderDevice::Vulkan(ref vrd) => vrd.new_render_command_buffer(count).map(|x| box x as _).map_err(From::from),
+            #[cfg(windows)]
+            &RenderDevice::DirectX12(_) => unimplemented!()
+        }
+    }
+    pub fn new_render_subcommand_buffer(&self, count: usize) -> Result<Box<RenderCommands>, Box<Error>>
+    {
+        match self
+        {
+            &RenderDevice::Vulkan(ref vrd) => vrd.new_render_subcommand_buffer(count).map(|x| box x as _).map_err(From::from),
+            #[cfg(windows)]
+            &RenderDevice::DirectX12(_) => unimplemented!()
         }
     }
 
@@ -65,6 +92,11 @@ impl RenderDevice
                 d.end_render(findex)?; Ok(())
             }
         }
+    }
+
+    pub(self) fn ensure_vk(&self) -> &vk::RenderDevice
+    {
+        match self { &RenderDevice::Vulkan(ref v) => v, _ => panic!("unexpected") }
     }
 }
 
@@ -87,3 +119,17 @@ impl Default for TextureParam
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorFormat { Grayscale, Default, WithAlpha }
 pub trait ResourceBlock {}
+
+pub trait RenderCommands
+{
+    fn begin_recording<'d>(&'d self, index: usize) -> Result<Box<RenderCommandsBasic + 'd>, Box<Error>>;
+}
+pub trait RenderCommandsBasic
+{
+    fn set_primary_render_target(&mut self, index: usize);
+    fn set_render_target(&mut self, target: &RenderTarget);
+    fn execute_subcommands_into_primary(&mut self, index: usize, subcommands: &[&CommandBuffer]);
+    fn execute_subcommands_into(&mut self, target: &RenderTarget, subcommands: &[&CommandBuffer]);
+}
+pub trait RenderTarget {}
+pub trait CommandBuffer {}

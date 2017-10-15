@@ -8,6 +8,9 @@ use metrics::*;
 use event::*;
 use std::sync::Arc;
 use std::mem::replace;
+use std::error::Error;
+
+const APPNAME: &'static str = "dc2017";
 
 pub struct LazyData<T>(Option<T>);
 impl<T> LazyData<T>
@@ -23,38 +26,33 @@ impl<T> LazyData<T>
         }
         self.0.as_ref().unwrap()
     }
-    pub fn load_mut<F: FnOnce() -> T>(&mut self, loader: F) -> &mut T
-    {
-        if self.0.is_none() { self.0 = Some(loader()); }
-        self.0.as_mut().unwrap()
-    }
 }
 
-pub struct MemoryIndices { devlocal: u32, host: u32 }
-pub struct RenderDevice
+pub struct RenderDeviceCore
 {
-    instance: fe::Instance, adapter: fe::PhysicalDevice, device: fe::Device, graphics_queue: (u32, fe::Queue), transfer_queue: (u32, fe::Queue),
-    surface: fe::Surface, swapchain: fe::Swapchain, rt_views: Vec<fe::ImageView>,
+    instance: fe::Instance, adapter: fe::PhysicalDevice, device: fe::Device,
     #[cfg(feature = "debug")] debug_report: fe::DebugReportCallback,
+    graphics_queue: (u32, fe::Queue), transfer_queue: (u32, fe::Queue),
 
-    agent_str: LazyData<String>, devprops: LazyData<fe::vk::VkPhysicalDeviceProperties>, memindices: MemoryIndices, render_control: RenderControl
+    agent_str: LazyData<String>, devprops: LazyData<fe::vk::VkPhysicalDeviceProperties>, memindices: MemoryIndices
 }
-impl RenderDevice
+impl RenderDeviceCore
 {
-    #[cfg(feature = "target_x11")] const PLATFORM_SURFACE_EXTENSION: &'static str = "VK_KHR_xcb_surface";
-    #[cfg(windows)] const PLATFORM_SURFACE_EXTENSION: &'static str = "VK_KHR_win32_surface";
-
-    pub fn init() -> fe::Result<Self>
+    AppInstance!(static instance: fe::Result<RenderDeviceCore> = Self::init());
+    fn get<'a>() -> &'a Self { Self::instance().as_ref().unwrap() }
+    fn init() -> fe::Result<Self>
     {
-        use std::cmp::max;
+        #[cfg(feature = "target_x11")] const PLATFORM_SURFACE_EXTENSION: &'static str = "VK_KHR_xcb_surface";
+        #[cfg(windows)] const PLATFORM_SURFACE_EXTENSION: &'static str = "VK_KHR_win32_surface";
 
-        let mut ibuilder = fe::InstanceBuilder::new("dc2017", (0, 1, 0), "ferrite", (0, 1, 0));
-        ibuilder.add_extensions(vec!["VK_KHR_surface", Self::PLATFORM_SURFACE_EXTENSION]);
+        let mut ibuilder = fe::InstanceBuilder::new(APPNAME, (0, 1, 0), "Kaede", (0, 1, 0));
+        ibuilder.add_extensions(vec!["VK_KHR_surface", PLATFORM_SURFACE_EXTENSION]);
         #[cfg(feature = "debug")] ibuilder.add_extension("VK_EXT_debug_report").add_layer("VK_LAYER_LUNARG_standard_validation");
         let instance = ibuilder.create()?;
         #[cfg(feature = "debug")]
         let debug_report = fe::DebugReportCallback::new::<()>(&instance, fe::DebugReportFlags::ERROR.warning().performance_warning(),
-            Self::debug_call, None).expect("Failed to create a debug reporter object");
+            Self::debug_call, None).expect("Failed to create a debug report object");
+        
         let adapter = instance.enumerate_physical_devices().expect("PhysicalDevices are not found").remove(0);
         let queue_families = adapter.queue_family_properties();
         let graphics_qf = queue_families.find_matching_index(fe::QueueFlags::GRAPHICS).expect("Failed to find graphics queue family");
@@ -77,35 +75,6 @@ impl RenderDevice
         let gq = (graphics_qf, device.queue(graphics_qf, 0));
         let tq = (transfer_qf, device.queue(transfer_qf, if graphics_qf == transfer_qf { ::std::cmp::min(1, gq_count - 1) } else { 0 }));
 
-        let ref target = Application::instance().main_window;
-        if !WindowServer::instance().presentation_support(&adapter, graphics_qf)
-        {
-            panic!("System doesn't have Vulkan Presentation support");
-        }
-        let surface = WindowServer::instance().new_render_surface(target, &instance).expect("Failed to create Render Surface");
-        if !adapter.surface_support(graphics_qf, &surface).expect("Failed to check: PhysicalDevice has Surface Rendering support")
-        {
-            panic!("PhysicalDevice doesn't have Surface Rendering support");
-        }
-        let caps = adapter.surface_capabilities(&surface).expect("Failed to get Surface capabilities");
-        let formats = adapter.surface_formats(&surface).expect("Failed to get supported Surface Pixel Formats");
-        let present_modes = adapter.surface_present_modes(&surface).expect("Failed to get supported Surface Presentation modes");
-        
-        let present_mode = present_modes.iter().find(|&&x| x == fe::PresentMode::Immediate)
-            .or_else(|| present_modes.iter().find(|&&x| x == fe::PresentMode::Mailbox))
-            .or_else(|| present_modes.iter().find(|&&x| x == fe::PresentMode::FIFO)).cloned().expect("Surface/PhysicalDevice must have support one of Immediate, Mailbox or FIFO present modes");
-        let format = formats.iter().find(|&x| fe::FormatQuery(x.format).eq_bit_width(32).has_components(fe::FormatComponents::RGBA).has_element_of(fe::ElementType::UNORM).passed())
-            .cloned().expect("Surface/PhysicalDevice must have support a format which has 32 bit width, components of RGBA and type of UNORM");
-        let (width, height) = target.client_size();
-        let swapchain = fe::SwapchainBuilder::new(&surface, max(2, caps.minImageCount), format, fe::Extent2D(width as _, height as _), fe::ImageUsage::COLOR_ATTACHMENT)
-            .present_mode(present_mode).enable_clip().composite_alpha(fe::CompositeAlpha::Opaque)
-            .pre_transform(fe::SurfaceTransform::Identity).create(&device).expect("Failed to create a Swapchain");
-        let images = swapchain.get_images().expect("Failed to get swapchain buffers");
-        let views = images.iter().map(|i| i.create_view(None, None, &fe::ComponentMapping::default(), &fe::ImageSubresourceRange
-        {
-            aspect_mask: fe::AspectMask::COLOR, mip_levels: 0 .. 1, array_layers: 0 .. 1
-        })).collect::<Result<Vec<_>, _>>().expect("Failed to create views to each swapchain buffers");
-
         let memprops = adapter.memory_properties();
         let memindices = MemoryIndices
         {
@@ -113,21 +82,22 @@ impl RenderDevice
             host: memprops.find_host_visible_index().expect("Unable to find a memory index which can be visibled from the host")
         };
 
-        #[cfg(feature = "debug")]
-        { Ok(RenderDevice
-        {
-            render_control: RenderControl::init(&device),
-            instance, adapter, device, graphics_queue: gq, transfer_queue: tq, surface, swapchain, rt_views: views, debug_report,
-            agent_str: LazyData::INIT, devprops: LazyData::INIT, memindices
-        }) }
-        #[cfg(not(feature = "debug"))]
-        { Ok(RenderDevice
-        {
-            render_control: RenderControl::init(&device),
-            instance, adapter, device, graphics_queue: gq, transfer_queue: tq, surface, swapchain, rt_views: views,
-            agent_str: LazyData::INIT, devprops: LazyData::INIT, memindices
-        }) }
+        #[cfg(feature = "debug")] {
+            Ok(RenderDeviceCore
+            {
+                instance, adapter, device, debug_report, graphics_queue: gq, transfer_queue: tq, agent_str: LazyData::INIT,
+                devprops: LazyData::INIT, memindices
+            })
+        }
+        #[cfg(not(feature = "debug"))] {
+            Ok(RenderDeviceCore
+            {
+                instance, adapter, device, graphics_queue: gq, transfer_queue: tq, agent_str: LazyData::INIT,
+                devprops: LazyData::INIT, memindices
+            })
+        }
     }
+
     #[cfg(feature = "debug")]
     #[allow(dead_code)]
     extern "system" fn debug_call(flags: fe::vk::VkDebugReportFlagsEXT, object_type: fe::vk::VkDebugReportObjectTypeEXT,
@@ -138,26 +108,88 @@ impl RenderDevice
         println!("[debug_call]{:?}", unsafe { CStr::from_ptr(message) }); fe::vk::VK_FALSE
     }
 }
-impl Drop for RenderDevice
+impl Drop for RenderDeviceCore
 {
     fn drop(&mut self) { self.device.wait().unwrap(); }
+}
+
+pub struct MemoryIndices { devlocal: u32, host: u32 }
+pub struct RenderDevice
+{
+    surface: fe::Surface, swapchain: fe::Swapchain, rt_views: Vec<fe::ImageView>,
+    render_control: RenderControl, primary_rt_pass: fe::RenderPass, rtsc: Vec<fe::Framebuffer>
+}
+impl RenderDevice
+{
+    pub fn init() -> Result<Self, &'static fe::VkResultBox>
+    {
+        let ref core = RenderDeviceCore::instance().as_ref()?;
+
+        let ref target = Application::instance().main_window;
+        if !WindowServer::instance().presentation_support(&core.adapter, core.graphics_queue.0)
+        {
+            panic!("System doesn't have Vulkan Presentation support");
+        }
+        let surface = WindowServer::instance().new_render_surface(target, &core.instance).expect("Failed to create Render Surface");
+        if !core.adapter.surface_support(core.graphics_queue.0, &surface).expect("Failed to check: PhysicalDevice has Surface Rendering support")
+        {
+            panic!("PhysicalDevice doesn't have Surface Rendering support");
+        }
+        let caps = core.adapter.surface_capabilities(&surface).expect("Failed to get Surface capabilities");
+        let formats = core.adapter.surface_formats(&surface).expect("Failed to get supported Surface Pixel Formats");
+        let present_modes = core.adapter.surface_present_modes(&surface).expect("Failed to get supported Surface Presentation modes");
+        
+        let present_mode = present_modes.iter().find(|&&x| x == fe::PresentMode::Immediate)
+            .or_else(|| present_modes.iter().find(|&&x| x == fe::PresentMode::Mailbox))
+            .or_else(|| present_modes.iter().find(|&&x| x == fe::PresentMode::FIFO)).cloned().expect("Surface/PhysicalDevice must have support one of Immediate, Mailbox or FIFO present modes");
+        let format = formats.iter().find(|&x| fe::FormatQuery(x.format).eq_bit_width(32).has_components(fe::FormatComponents::RGBA).has_element_of(fe::ElementType::UNORM).passed())
+            .cloned().expect("Surface/PhysicalDevice must have support a format which has 32 bit width, components of RGBA and type of UNORM");
+        let fmt = format.format;
+        let (width, height) = target.client_size();
+        let swapchain = fe::SwapchainBuilder::new(&surface, ::std::cmp::max(2, caps.minImageCount), format,
+            fe::Extent2D(width as _, height as _), fe::ImageUsage::COLOR_ATTACHMENT)
+            .present_mode(present_mode).enable_clip().composite_alpha(fe::CompositeAlpha::Opaque)
+            .pre_transform(fe::SurfaceTransform::Identity).create(&core.device).expect("Failed to create a Swapchain");
+        let images = swapchain.get_images().expect("Failed to get swapchain buffers");
+        let views = images.iter().map(|i| i.create_view(None, None, &fe::ComponentMapping::default(), &fe::ImageSubresourceRange
+        {
+            aspect_mask: fe::AspectMask::COLOR, mip_levels: 0 .. 1, array_layers: 0 .. 1
+        })).collect::<Result<Vec<_>, _>>().expect("Failed to create views to each swapchain buffers");
+        let primary_rt_pass = fe::RenderPassBuilder::new()
+            .add_attachment(fe::vk::VkAttachmentDescription
+            {
+                loadOp: fe::vk::VK_ATTACHMENT_LOAD_OP_CLEAR, storeOp: fe::vk::VK_ATTACHMENT_STORE_OP_STORE,
+                format: fmt, initialLayout: fe::ImageLayout::ColorAttachmentOpt as _, finalLayout: fe::ImageLayout::PresentSrc as _,
+                samples: 1, flags: 0, stencilLoadOp: fe::vk::VK_ATTACHMENT_LOAD_OP_DONT_CARE, stencilStoreOp: fe::vk::VK_ATTACHMENT_STORE_OP_DONT_CARE
+            })
+            .add_subpass(fe::SubpassDescription::new().add_color_output(0, fe::ImageLayout::ColorAttachmentOpt, None))
+            .create(&core.device).expect("Failed to create a render pass object for primary render targets");
+        let rtsc = views.iter().map(|v| fe::Framebuffer::new(&primary_rt_pass, &[v], v.size(), 1))
+            .collect::<Result<_, _>>().expect("Failed to create render targets of each swapchain buffers");
+
+        #[cfg(feature = "debug")]
+        Ok(RenderDevice
+        {
+            render_control: RenderControl::init(&core.device), surface, swapchain, rt_views: views, primary_rt_pass, rtsc
+        })
+    }
 }
 
 impl RenderDevice
 {
     pub fn agent(&self) -> &str
     {
-        self.agent_str.load(||
+        RenderDeviceCore::get().agent_str.load(||
         {
             use std::ffi::CStr;
 
-            let adapter_properties = self.devprops.load(|| self.adapter.properties());
+            let adapter_properties = RenderDeviceCore::get().devprops.load(|| RenderDeviceCore::get().adapter.properties());
             format!("Vulkan {:?}", unsafe { CStr::from_ptr(adapter_properties.deviceName.as_ptr()) })
         })
     }
     pub fn minimum_uniform_alignment(&self) -> fe::vk::VkDeviceSize
     {
-        self.devprops.load(|| self.adapter.properties()).limits.minUniformBufferOffsetAlignment
+        RenderDeviceCore::get().devprops.load(|| RenderDeviceCore::get().adapter.properties()).limits.minUniformBufferOffsetAlignment
     }
 
     pub fn create_resources(&self, buffer_data: &[super::BufferContent], texture_data: &[super::TextureParam]) -> fe::Result<ResourceBlock>
@@ -176,8 +208,8 @@ impl RenderDevice
         let (buffer, sbuffer) = if buffer_size > 0
         {
             let buffer_usage = fe::BufferUsage(bdp.iter().fold(0, |bits, b| bits | b.flags));
-            let buffer = fe::BufferDesc::new(buffer_size as _, buffer_usage).create(&self.device)?;
-            let sbuffer = fe::BufferDesc::new(buffer_size as _, buffer_usage).create(&self.device)?;
+            let buffer = fe::BufferDesc::new(buffer_size as _, buffer_usage).create(&RenderDeviceCore::get().device)?;
+            let sbuffer = fe::BufferDesc::new(buffer_size as _, buffer_usage).create(&RenderDeviceCore::get().device)?;
             (Some(buffer), Some(sbuffer))
         }
         else { (None, None) };
@@ -188,7 +220,7 @@ impl RenderDevice
             let mut usage = if render_target { fe::ImageUsage::COLOR_ATTACHMENT } else { fe::ImageUsage::SAMPLED };
             if require_staging { usage = usage.transfer_dest(); }
             Some(fe::ImageDesc::new(fe::Extent2D(size.x(), size.y()), color.translate_vk(), usage, fe::ImageLayout::Preinitialized)
-                .array_layers(layers).create(&self.device).map(|o|
+                .array_layers(layers).create(&RenderDeviceCore::get().device).map(|o|
                 {
                     let req = o.requirements();
                     let offset = alignment(*current_offset, req.alignment);
@@ -201,7 +233,7 @@ impl RenderDevice
         let tdps: Vec<_> = texture_data.into_iter().filter(|p| p.require_staging && !p.render_target).scan(0, |current_offset, &super::TextureParam { size, layers, color, .. }|
         {
             Some(fe::ImageDesc::new(fe::Extent2D(size.x(), size.y()), color.translate_vk(), fe::ImageUsage::TRANSFER_SRC, fe::ImageLayout::Preinitialized)
-                .use_linear_tiling().array_layers(layers).create(&self.device).map(|o|
+                .use_linear_tiling().array_layers(layers).create(&RenderDeviceCore::get().device).map(|o|
                 {
                     let req = o.requirements();
                     let offset = alignment(*current_offset, req.alignment);
@@ -212,8 +244,8 @@ impl RenderDevice
         }).collect::<fe::Result<_>>()?;
         let buffer_base = alignment(texture_bytes, bufalloc.map(|x| x.alignment).unwrap_or(1));
         let sbuffer_base = alignment(stexture_bytes, sbufalloc.map(|x| x.alignment).unwrap_or(1));
-        let memory = fe::DeviceMemory::allocate(&self.device, (buffer_base + buffer_size) as _, self.memindices.devlocal)?;
-        let smemory = fe::DeviceMemory::allocate(&self.device, (sbuffer_base + buffer_size) as _, self.memindices.host)?;
+        let memory = fe::DeviceMemory::allocate(&RenderDeviceCore::get().device, (buffer_base + buffer_size) as _, RenderDeviceCore::get().memindices.devlocal)?;
+        let smemory = fe::DeviceMemory::allocate(&RenderDeviceCore::get().device, (sbuffer_base + buffer_size) as _, RenderDeviceCore::get().memindices.host)?;
         if let Some(ref b) = buffer.as_ref() { b.bind(&memory, buffer_base as _)?; }
         if let Some(ref b) = sbuffer.as_ref() { b.bind(&smemory, sbuffer_base as _)?; }
         let mut image = Vec::with_capacity(tdp.len());
@@ -226,6 +258,23 @@ impl RenderDevice
         Ok(ResourceBlock { memory, smemory, buffer, sbuffer, image, simage: tdps })
     }
 
+    /*pub fn new_render_target(&self, res: &fe::ImageView, optimized_clear: Option<Color>, after_usage: ResourceAfterUsage) -> fe::Result<RenderTarget>
+    {
+        let rp = fe::RenderPassBuilder::new()
+            .add_attachment(fe::vk::VkAttachmentDescription
+            {
+                loadOp: if optimized_clear.is_some() { fe::vk::VK_ATTACHMENT_LOAD_OP_CLEAR } else { fe::vk::VK_ATTACHMENT_LOAD_OP_LOAD },
+                storeOp: fe::vk::VK_ATTACHMENT_STORE_OP_STORE,
+                format: res.format(), initialLayout: fe::ImageLayout::ColorAttachmentOpt as _, finalLayout: after_usage.translate_vk() as _,
+                samples: 1, flags: 0, stencilLoadOp: fe::vk::VK_ATTACHMENT_LOAD_OP_DONT_CARE, stencilStoreOp: fe::vk::VK_ATTACHMENT_STORE_OP_DONT_CARE
+            })
+            .add_subpass(fe::SubpassDescription::new().add_color_output(0, fe::ImageLayout::ColorAttachmentOpt, None))
+            .create(&self.device)?;
+        let fb = fe::Framebuffer::new(&rp, &[res], res.size(), 1)?;
+        Ok(RenderTarget(rp, fb, optimized_clear))
+    }*/
+
+    pub fn swapchain_buffer_count(&self) -> usize { self.rtsc.len() }
     pub fn begin_render(&self, wait: bool) -> fe::Result<Option<()>>
     {
         let exec_render = if wait { self.render_control.wait_last_render_completion()?; true }
@@ -234,6 +283,41 @@ impl RenderDevice
         else
         {
             // TODO: impl here
+            unimplemented!();
+        }
+    }
+
+    pub fn new_render_command_buffer(&self, count: usize) -> fe::Result<RenderCommands>
+    {
+        let cp = fe::CommandPool::new(&RenderDeviceCore::get().device, RenderDeviceCore::get().graphics_queue.0, false, false)?;
+        let commands = cp.alloc(count as _, true)?;
+        Ok(RenderCommands(cp, commands))
+    }
+    pub fn new_render_subcommand_buffer(&self, count: usize) -> fe::Result<RenderCommands>
+    {
+        let cp = fe::CommandPool::new(&RenderDeviceCore::get().device, RenderDeviceCore::get().graphics_queue.0, false, false)?;
+        let commands = cp.alloc(count as _, false)?;
+        Ok(RenderCommands(cp, commands))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy)] pub enum ResourceAfterUsage
+{
+    Displayed, ShaderRead, TargetedForRender, CopySource
+}
+#[repr(C)] #[derive(Debug, Clone, PartialEq)]
+pub struct Color(pub f32, pub f32, pub f32, pub f32);
+impl AsRef<[f32; 4]> for Color { fn as_ref(&self) -> &[f32; 4] { unsafe { ::std::mem::transmute(self) } } }
+impl ResourceAfterUsage
+{
+    fn translate_vk(self) -> fe::ImageLayout
+    {
+        match self
+        {
+            ResourceAfterUsage::Displayed => fe::ImageLayout::PresentSrc,
+            ResourceAfterUsage::ShaderRead => fe::ImageLayout::ShaderReadOnlyOpt,
+            ResourceAfterUsage::TargetedForRender => fe::ImageLayout::ColorAttachmentOpt,
+            ResourceAfterUsage::CopySource => fe::ImageLayout::TransferSrcOpt
         }
     }
 }
@@ -256,9 +340,9 @@ impl super::ColorFormat
     {
         match self
         {
-            super::ColorFormat::Grayscale => fe::vk::VK_FORMAT_R8_UNORM as _,
-            super::ColorFormat::Default => fe::vk::VK_FORMAT_R8G8B8_UNORM as _,
-            super::ColorFormat::WithAlpha => fe::vk::VK_FORMAT_R8G8B8A8_UNORM as _
+            super::ColorFormat::Grayscale => fe::vk::VK_FORMAT_R8_UNORM,
+            super::ColorFormat::Default => fe::vk::VK_FORMAT_R8G8B8_UNORM,
+            super::ColorFormat::WithAlpha => fe::vk::VK_FORMAT_R8G8B8A8_UNORM
         }
     }
 }
@@ -269,6 +353,8 @@ pub struct ResourceBlock
     image: Vec<fe::Image>, simage: Vec<TexturePlacement>
 }
 impl super::ResourceBlock for ResourceBlock {}
+
+pub struct RenderTarget(fe::RenderPass, fe::Framebuffer, Option<Color>);
 
 pub struct RenderControl
 {
@@ -326,4 +412,67 @@ impl RenderControl
 impl Drop for RenderControl
 {
     fn drop(&mut self) { self.ev_thread_exit.set(); replace(&mut self.th, None).unwrap().join().unwrap(); }
+}
+
+pub struct RenderCommands(fe::CommandPool, Vec<fe::CommandBuffer>);
+pub struct CommandRecorder<'d> { rec: fe::CmdRecord<'d>, in_render_pass: bool }
+
+impl<'d> Drop for CommandRecorder<'d>
+{
+    fn drop(&mut self) { if self.in_render_pass { self.rec.end_render_pass(); } }
+}
+
+impl super::CommandBuffer for fe::CommandBuffer {}
+impl super::RenderCommands for RenderCommands
+{
+    fn begin_recording<'s>(&'s self, index: usize) -> Result<Box<super::RenderCommandsBasic + 's>, Box<Error>>
+    {
+        Ok(box CommandRecorder { rec: self.1[index].begin()?, in_render_pass: false })
+    }
+}
+impl<'d> super::RenderCommandsBasic for CommandRecorder<'d>
+{
+    fn set_primary_render_target(&mut self, index: usize)
+    {
+        let ref ptarget = super::RenderDevice::get().ensure_vk();
+        if self.in_render_pass { self.rec.end_render_pass(); }
+        self.rec.begin_render_pass(&ptarget.primary_rt_pass, &ptarget.rtsc[index],
+            ptarget.rtsc[index].size().clone().into(), &[fe::ClearValue::Color([0.0; 4])], true);
+        self.in_render_pass = true;
+    }
+    fn set_render_target(&mut self, target: &super::RenderTarget)
+    {
+        let target = unsafe { &*(target as *const _ as *const RenderTarget) };
+        if self.in_render_pass { self.rec.end_render_pass(); }
+        if let Some(ref c) = target.2.as_ref()
+        {
+            self.rec.begin_render_pass(&target.0, &target.1, target.1.size().clone().into(), &[fe::ClearValue::Color(c.as_ref().clone())], false);
+        }
+        else { self.rec.begin_render_pass(&target.0, &target.1, target.1.size().clone().into(), &[], false); }
+        self.in_render_pass = true;
+    }
+    fn execute_subcommands_into_primary(&mut self, index: usize, subcommands: &[&super::CommandBuffer])
+    {
+        let ref ptarget = super::RenderDevice::get().ensure_vk();
+        if self.in_render_pass { self.rec.end_render_pass(); }
+        unsafe { self.rec.begin_render_pass(&ptarget.primary_rt_pass, &ptarget.rtsc[index],
+            ptarget.rtsc[index].size().clone().into(), &[fe::ClearValue::Color([0.0; 4])], false)
+            .execute_commands(&subcommands.into_iter().map(|&sc| unsafe { &*(sc as *const _ as *const fe::CommandBuffer) }.native_ptr()).collect::<Vec<_>>())
+            .end_render_pass(); }
+        self.in_render_pass = false;
+    }
+    fn execute_subcommands_into(&mut self, target: &super::RenderTarget, subcommands: &[&super::CommandBuffer])
+    {
+        let target = unsafe { &*(target as *const _ as *const RenderTarget) };
+        if self.in_render_pass { self.rec.end_render_pass(); }
+        if let Some(ref c) = target.2.as_ref()
+        {
+            self.rec.begin_render_pass(&target.0, &target.1, target.1.size().clone().into(), &[fe::ClearValue::Color(c.as_ref().clone())], false);
+        }
+        else { self.rec.begin_render_pass(&target.0, &target.1, target.1.size().clone().into(), &[], false); }
+        unsafe { self.rec
+            .execute_commands(&subcommands.into_iter().map(|&sc| unsafe { &*(sc as *const _ as *const fe::CommandBuffer) }.native_ptr()).collect::<Vec<_>>())
+            .end_render_pass(); }
+        self.in_render_pass = false;
+    }
 }
