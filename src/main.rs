@@ -40,13 +40,17 @@ impl WelcomeSceneRender
         let res = RenderDevice::get().create_resources(&[], &[
             TextureParam { size: Size2U(w, h), color: ColorFormat::Grayscale, require_staging: true, .. Default::default() }
         ]).expect("Failed to create some resources");
-        let primary_cmds = RenderDevice::get().new_render_command_buffer(RenderDevice::get().swapchain_buffer_count())
+        RenderDevice::get().update_render_commands(|rec, n|
+        {
+            rec.set_render_target(&*RenderDevice::get().get_primary_render_target(n));
+        }).expect("Failed to initialize render commands");
+        /*let primary_cmds = RenderDevice::get().new_render_command_buffer(RenderDevice::get().swapchain_buffer_count())
             .expect("Failed to generate render command buffers");
         for n in 0 .. RenderDevice::get().swapchain_buffer_count()
         {
             primary_cmds.begin_recording(n).expect("Failed to begin recording a command buffer")
                 .set_primary_render_target(n);
-        }
+        }*/
         // RenderDevice::get().do_render(|| ()).unwrap();
         WelcomeSceneRender {}
     }

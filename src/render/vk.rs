@@ -117,7 +117,8 @@ pub struct MemoryIndices { devlocal: u32, host: u32 }
 pub struct RenderDevice
 {
     surface: fe::Surface, swapchain: fe::Swapchain, rt_views: Vec<fe::ImageView>,
-    render_control: RenderControl, primary_rt_pass: fe::RenderPass, rtsc: Vec<fe::Framebuffer>
+    render_control: RenderControl, primary_rt_pass: fe::RenderPass, rtsc: Vec<fe::Framebuffer>,
+    rtcp: fe::CommandPool, rtcmds: Vec<fe::CommandBuffer>
 }
 impl RenderDevice
 {
@@ -164,13 +165,16 @@ impl RenderDevice
             })
             .add_subpass(fe::SubpassDescription::new().add_color_output(0, fe::ImageLayout::ColorAttachmentOpt, None))
             .create(&core.device).expect("Failed to create a render pass object for primary render targets");
-        let rtsc = views.iter().map(|v| fe::Framebuffer::new(&primary_rt_pass, &[v], v.size(), 1))
+        let rtsc: Vec<_> = views.iter().map(|v| fe::Framebuffer::new(&primary_rt_pass, &[v], v.size(), 1))
             .collect::<Result<_, _>>().expect("Failed to create render targets of each swapchain buffers");
+        let rtcp = fe::CommandPool::new(&core.device, core.graphics_queue.0, false, false).expect("Failed to create a CommandPool");
+        let rtcmds = rtcp.alloc(rtsc.len() as _, true).expect("Failed to allocate command buffers for rendering to swapchain buffers");
 
         #[cfg(feature = "debug")]
         Ok(RenderDevice
         {
-            render_control: RenderControl::init(&core.device), surface, swapchain, rt_views: views, primary_rt_pass, rtsc
+            render_control: RenderControl::init(&core.device), surface, swapchain, rt_views: views, primary_rt_pass, rtsc,
+            rtcp, rtcmds
         })
     }
 }
@@ -257,6 +261,18 @@ impl RenderDevice
 
         Ok(ResourceBlock { memory, smemory, buffer, sbuffer, image, simage: tdps })
     }
+
+    pub fn update_render_commands<F: FnMut(&mut super::RenderCommandsBasic, usize)>(&self, mut updater: F) -> fe::Result<()>
+    {
+        self.rtcp.reset(true)?;
+        for (n, c) in self.rtcmds.iter().enumerate()
+        {
+            let mut rec = CommandRecorder { rec: c.begin()?, in_render_pass: false };
+            updater(&mut rec, n);
+        }
+        Ok(())
+    }
+    pub fn get_primary_render_target(&self, index: usize) -> RenderTarget { RenderTarget::PrimaryRT(index) }
 
     /*pub fn new_render_target(&self, res: &fe::ImageView, optimized_clear: Option<Color>, after_usage: ResourceAfterUsage) -> fe::Result<RenderTarget>
     {
@@ -354,7 +370,39 @@ pub struct ResourceBlock
 }
 impl super::ResourceBlock for ResourceBlock {}
 
-pub struct RenderTarget(fe::RenderPass, fe::Framebuffer, Option<Color>);
+pub enum RenderTarget
+{
+    Owned(fe::RenderPass, fe::Framebuffer, Option<Color>),
+    PrimaryRT(usize)
+}
+impl super::RenderTarget for RenderTarget {}
+impl RenderTarget
+{
+    fn pass(&self) -> &fe::RenderPass
+    {
+        match *self
+        {
+            RenderTarget::Owned(ref r, _, _) => r,
+            RenderTarget::PrimaryRT(_) => &super::RenderDevice::get().ensure_vk().primary_rt_pass
+        }
+    }
+    fn fb(&self) -> &fe::Framebuffer
+    {
+        match *self
+        {
+            RenderTarget::Owned(_, ref f, _) => f,
+            RenderTarget::PrimaryRT(n) => &super::RenderDevice::get().ensure_vk().rtsc[n]
+        }
+    }
+    fn opt_clear(&self) -> Option<&Color>
+    {
+        match *self
+        {
+            RenderTarget::Owned(_, _, ref o) => o.as_ref(),
+            RenderTarget::PrimaryRT(_) => Some(&Color(0.0, 0.0, 0.0, 0.0))
+        }
+    }
+}
 
 pub struct RenderControl
 {
@@ -369,7 +417,6 @@ impl RenderControl
         let fence_th = fence.clone();
         let (ev_queue_render, ev_render_ready, ev_thread_exit) = (Event::new(), Event::new(), Event::new());
         let (eqr_s, err_s, ete_s) = (ev_queue_render.share_inner(), ev_render_ready.share_inner(), ev_thread_exit.share_inner());
-        // let ev_queue_render = box 
         RenderControl
         {
             th: Some(::std::thread::Builder::new().name("RenderControl Fence Observer".into()).spawn(move ||
@@ -432,44 +479,26 @@ impl super::RenderCommands for RenderCommands
 }
 impl<'d> super::RenderCommandsBasic for CommandRecorder<'d>
 {
-    fn set_primary_render_target(&mut self, index: usize)
-    {
-        let ref ptarget = super::RenderDevice::get().ensure_vk();
-        if self.in_render_pass { self.rec.end_render_pass(); }
-        self.rec.begin_render_pass(&ptarget.primary_rt_pass, &ptarget.rtsc[index],
-            ptarget.rtsc[index].size().clone().into(), &[fe::ClearValue::Color([0.0; 4])], true);
-        self.in_render_pass = true;
-    }
     fn set_render_target(&mut self, target: &super::RenderTarget)
     {
         let target = unsafe { &*(target as *const _ as *const RenderTarget) };
         if self.in_render_pass { self.rec.end_render_pass(); }
-        if let Some(ref c) = target.2.as_ref()
+        if let Some(ref c) = target.opt_clear()
         {
-            self.rec.begin_render_pass(&target.0, &target.1, target.1.size().clone().into(), &[fe::ClearValue::Color(c.as_ref().clone())], false);
+            self.rec.begin_render_pass(target.pass(), target.fb(), target.fb().size().clone().into(), &[fe::ClearValue::Color(c.as_ref().clone())], false);
         }
-        else { self.rec.begin_render_pass(&target.0, &target.1, target.1.size().clone().into(), &[], false); }
+        else { self.rec.begin_render_pass(target.pass(), target.fb(), target.fb().size().clone().into(), &[], false); }
         self.in_render_pass = true;
-    }
-    fn execute_subcommands_into_primary(&mut self, index: usize, subcommands: &[&super::CommandBuffer])
-    {
-        let ref ptarget = super::RenderDevice::get().ensure_vk();
-        if self.in_render_pass { self.rec.end_render_pass(); }
-        unsafe { self.rec.begin_render_pass(&ptarget.primary_rt_pass, &ptarget.rtsc[index],
-            ptarget.rtsc[index].size().clone().into(), &[fe::ClearValue::Color([0.0; 4])], false)
-            .execute_commands(&subcommands.into_iter().map(|&sc| unsafe { &*(sc as *const _ as *const fe::CommandBuffer) }.native_ptr()).collect::<Vec<_>>())
-            .end_render_pass(); }
-        self.in_render_pass = false;
     }
     fn execute_subcommands_into(&mut self, target: &super::RenderTarget, subcommands: &[&super::CommandBuffer])
     {
         let target = unsafe { &*(target as *const _ as *const RenderTarget) };
         if self.in_render_pass { self.rec.end_render_pass(); }
-        if let Some(ref c) = target.2.as_ref()
+        if let Some(ref c) = target.opt_clear()
         {
-            self.rec.begin_render_pass(&target.0, &target.1, target.1.size().clone().into(), &[fe::ClearValue::Color(c.as_ref().clone())], false);
+            self.rec.begin_render_pass(target.pass(), target.fb(), target.fb().size().clone().into(), &[fe::ClearValue::Color(c.as_ref().clone())], false);
         }
-        else { self.rec.begin_render_pass(&target.0, &target.1, target.1.size().clone().into(), &[], false); }
+        else { self.rec.begin_render_pass(target.pass(), target.fb(), target.fb().size().clone().into(), &[], false); }
         unsafe { self.rec
             .execute_commands(&subcommands.into_iter().map(|&sc| unsafe { &*(sc as *const _ as *const fe::CommandBuffer) }.native_ptr()).collect::<Vec<_>>())
             .end_render_pass(); }

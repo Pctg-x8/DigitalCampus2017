@@ -78,6 +78,24 @@ impl RenderDevice
             &RenderDevice::DirectX12(_) => unimplemented!()
         }
     }
+    pub fn update_render_commands<'d, F: FnMut(&mut RenderCommandsBasic, usize)>(&self, updater: F) -> Result<(), Box<Error>>
+    {
+        match self
+        {
+            &RenderDevice::Vulkan(ref v) => v.update_render_commands(updater).map_err(From::from),
+            #[cfg(windows)]
+            &RenderDevice::DirectX12(_) => unimplemented!()
+        }
+    }
+    pub fn get_primary_render_target<'d>(&'d self, index: usize) -> Box<RenderTarget + 'd>
+    {
+        match self
+        {
+            &RenderDevice::Vulkan(ref v) => box v.get_primary_render_target(index) as _,
+            #[cfg(windows)]
+            &RenderDevice::DirectX12(_) => unimplemented!()
+        }
+    }
 
     pub fn do_render<F: FnOnce()>(&self, f: F) -> Result<(), Box<Error>>
     {
@@ -126,9 +144,7 @@ pub trait RenderCommands
 }
 pub trait RenderCommandsBasic
 {
-    fn set_primary_render_target(&mut self, index: usize);
     fn set_render_target(&mut self, target: &RenderTarget);
-    fn execute_subcommands_into_primary(&mut self, index: usize, subcommands: &[&CommandBuffer]);
     fn execute_subcommands_into(&mut self, target: &RenderTarget, subcommands: &[&CommandBuffer]);
 }
 pub trait RenderTarget {}
