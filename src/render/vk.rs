@@ -172,6 +172,23 @@ impl RenderDevice
         let rtcp = fe::CommandPool::new(&core.device, core.graphics_queue.0, false, false).expect("Failed to create a CommandPool");
         let rtcmds = rtcp.alloc(rtsc.len() as _, true).expect("Failed to allocate command buffers for rendering to swapchain buffers");
 
+        let cpt = fe::CommandPool::new(&core.device, core.graphics_queue.0, true, false).expect("Failed to create a CommandPool");
+        let init_c = cpt.alloc(1, true).expect("Failed to allocate a command buffer to initialize render targets");
+        init_c[0].begin().expect("Failed to record initial commands")
+            .pipeline_barrier(fe::PipelineStageFlags::ALL_COMMANDS, fe::PipelineStageFlags::ALL_COMMANDS, false,
+                &[], &[], &views.iter().map(|v| fe::vk::VkImageMemoryBarrier
+                {
+                    dstAccessMask: fe::vk::VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                    oldLayout: fe::ImageLayout::Undefined as _, newLayout: fe::ImageLayout::PresentSrc as _, image: v.deref().native_ptr(),
+                    subresourceRange: fe::vk::VkImageSubresourceRange { aspectMask: fe::AspectMask::COLOR.0, .. Default::default() },
+                    .. Default::default()
+                }).collect::<Vec<_>>());
+        core.graphics_queue.1.submit(&[fe::SubmissionBatch
+        {
+            command_buffers: Cow::Borrowed(&[&init_c[0]]), .. Default::default()
+        }], None).expect("Failed to submit initial commands");
+        core.device.wait().expect("Failed to submit initial commands");
+
         #[cfg(feature = "debug")]
         Ok(RenderDevice
         {
