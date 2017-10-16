@@ -30,13 +30,53 @@ impl<T> LazyData<T>
     }
 }
 
+#[repr(C)] #[derive(Debug, Clone, PartialEq)]
+pub struct PosUV { pub pos: [f32; 4], pub uv: [f32; 2], resv: [f32; 2] }
+impl PosUV
+{
+    pub const fn new(p: [f32; 4], u: [f32; 2]) -> Self
+    {
+        PosUV { pos: p, uv: u, resv: [0.0; 2] }
+    }
+}
+#[repr(C)]
+pub struct BuiltinVertices
+{
+    pub unit_rect: [PosUV; 4]
+}
+impl BuiltinVertices
+{
+    fn offset_unit_rect() -> usize { unsafe { ::std::mem::transmute(&::std::mem::transmute::<_, &Self>(0usize).unit_rect) } }
+    fn _sizeof() -> usize { ::std::mem::size_of::<Self>() }
+}
+#[repr(C)]
+pub struct BuiltinIndices
+{
+    pub unit_rect: [u16; 6]
+}
+impl BuiltinIndices
+{
+    fn offset_unit_rect() -> usize { unsafe { ::std::mem::transmute(&::std::mem::transmute::<_, &Self>(0usize).unit_rect) } }
+    fn _sizeof() -> usize { ::std::mem::size_of::<Self>() }
+}
+const UNIT_RECT_VERTICES: &'static [PosUV; 4] = &[
+    PosUV::new([-1.0, -1.0, 0.0, 1.0], [0.0, 0.0]),
+    PosUV::new([ 1.0, -1.0, 0.0, 1.0], [1.0, 0.0]),
+    PosUV::new([-1.0,  1.0, 0.0, 1.0], [0.0, 1.0]),
+    PosUV::new([ 1.0,  1.0, 0.0, 1.0], [1.0, 1.0])
+];
+
+pub struct VertexBufferSlice<'p> { buf: &'p fe::Buffer, offset: usize, count: usize }
+pub struct IndexBufferSlice<'p> { buf: &'p fe::Buffer, format: fe::IndexType, offset: usize, count: usize }
+
 pub struct RenderDeviceCore
 {
     instance: fe::Instance, adapter: fe::PhysicalDevice, device: fe::Device,
     #[cfg(feature = "debug")] debug_report: fe::DebugReportCallback,
     graphics_queue: (u32, fe::Queue), transfer_queue: (u32, fe::Queue),
 
-    agent_str: LazyData<String>, devprops: LazyData<fe::vk::VkPhysicalDeviceProperties>, memindices: MemoryIndices
+    agent_str: LazyData<String>, devprops: LazyData<fe::vk::VkPhysicalDeviceProperties>, memindices: MemoryIndices,
+    builtin_data: LazyData<(fe::DeviceMemory, fe::Buffer)>
 }
 impl RenderDeviceCore
 {
@@ -88,14 +128,14 @@ impl RenderDeviceCore
             Ok(RenderDeviceCore
             {
                 instance, adapter, device, debug_report, graphics_queue: gq, transfer_queue: tq, agent_str: LazyData::INIT,
-                devprops: LazyData::INIT, memindices
+                devprops: LazyData::INIT, memindices, builtin_data: LazyData::INIT
             })
         }
         #[cfg(not(feature = "debug"))] {
             Ok(RenderDeviceCore
             {
                 instance, adapter, device, graphics_queue: gq, transfer_queue: tq, agent_str: LazyData::INIT,
-                devprops: LazyData::INIT, memindices
+                devprops: LazyData::INIT, memindices, builtin_data: LazyData::INIT
             })
         }
     }
@@ -108,6 +148,52 @@ impl RenderDeviceCore
         use std::ffi::CStr;
 
         println!("[debug_call]{:?}", unsafe { CStr::from_ptr(message) }); fe::vk::VK_FALSE
+    }
+
+    fn query_builtin_buffer(&self) -> &fe::Buffer
+    {
+        &self.builtin_data.load(||
+        {
+            let bsize = BuiltinVertices::_sizeof() + BuiltinIndices::_sizeof();
+            let buf = fe::BufferDesc::new(bsize, fe::BufferUsage::VERTEX_BUFFER.index_buffer().transfer_dest())
+                .create(&self.device).expect("Failed to create a bulit-in buffer");
+            let breq = buf.requirements();
+            let mem = fe::DeviceMemory::allocate(&self.device, breq.size as _, self.memindices.devlocal)
+                .expect("Failed to allocate a device memory");
+            buf.bind(&mem, 0).expect("Failed to bind a device memory with a buffer");
+            let sbuf = fe::BufferDesc::new(bsize, fe::BufferUsage::TRANSFER_SRC).create(&self.device)
+                .expect("Failed to create abuilt-in buffer for staging");
+            let sbreq = sbuf.requirements();
+            let smem = fe::DeviceMemory::allocate(&self.device, sbreq.size as _, self.memindices.host)
+                .expect("Failed to allocate a host memory");
+            sbuf.bind(&smem, 0).expect("Failed to bind a host memory with a buffer");
+            smem.map(0 .. bsize).map(|mm|
+            {
+                let mv: &mut BuiltinVertices = unsafe { mm.get_mut(0) };
+                let mi: &mut BuiltinIndices = unsafe { mm.get_mut(BuiltinVertices::_sizeof()) };
+                mv.unit_rect.clone_from_slice(UNIT_RECT_VERTICES);
+                mi.unit_rect.copy_from_slice(&[0, 1, 2, 2, 1, 3]);
+            }).expect("Failed to initialize a built-in buffer");
+            RenderDevice::imm_transferring(|mut rec|
+            {
+                rec.pipeline_barrier(fe::PipelineStageFlags::ALL_COMMANDS, fe::PipelineStageFlags::TRANSFER, false, &[], &[fe::vk::VkBufferMemoryBarrier
+                {
+                    dstAccessMask: fe::vk::VK_ACCESS_TRANSFER_WRITE_BIT, buffer: buf.native_ptr(), offset: 0, size: bsize as _,
+                    .. Default::default()
+                }, fe::vk::VkBufferMemoryBarrier
+                {
+                    dstAccessMask: fe::vk::VK_ACCESS_TRANSFER_READ_BIT, buffer: buf.native_ptr(), offset: 0, size: bsize as _,
+                    .. Default::default()
+                }], &[]);
+                rec.copy_buffer(&sbuf, &buf, &[fe::vk::VkBufferCopy { srcOffset: 0, dstOffset: 0, size: bsize as _ }]);
+                rec.pipeline_barrier(fe::PipelineStageFlags::ALL_COMMANDS, fe::PipelineStageFlags::TRANSFER, false, &[], &[fe::vk::VkBufferMemoryBarrier
+                {
+                    srcAccessMask: fe::vk::VK_ACCESS_TRANSFER_WRITE_BIT, dstAccessMask: fe::vk::VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | fe::vk::VK_ACCESS_INDEX_READ_BIT,
+                    buffer: buf.native_ptr(), offset: 0, size: bsize as _, .. Default::default()
+                }], &[]);
+            }).expect("Failure while transferring data in a built-in buffer");
+            (mem, buf)
+        }).1
     }
 }
 impl Drop for RenderDevice
@@ -198,12 +284,23 @@ impl RenderDevice
         })
     }
 
-    fn imm_submission<F: FnOnce(fe::CmdRecord)>(&self, recorder: F) -> fe::Result<()>
+    fn imm_submission<F: FnOnce(fe::CmdRecord)>(recorder: F) -> fe::Result<()>
     {
         let core = RenderDeviceCore::get();
         let cpt = fe::CommandPool::new(&core.device, core.graphics_queue.0, true, false)?;
         let init_c = cpt.alloc(1, true)?; recorder(init_c[0].begin()?);
         core.graphics_queue.1.submit(&[fe::SubmissionBatch
+        {
+            command_buffers: Cow::Borrowed(&[&init_c[0]]), .. Default::default()
+        }], None)?;
+        core.device.wait()
+    }
+    fn imm_transferring<F: FnOnce(fe::CmdRecord)>(recorder: F) -> fe::Result<()>
+    {
+        let core = RenderDeviceCore::get();
+        let cpt = fe::CommandPool::new(&core.device, core.transfer_queue.0, true, false)?;
+        let init_c = cpt.alloc(1, true)?; recorder(init_c[0].begin()?);
+        core.transfer_queue.1.submit(&[fe::SubmissionBatch
         {
             command_buffers: Cow::Borrowed(&[&init_c[0]]), .. Default::default()
         }], None)?;
@@ -360,7 +457,7 @@ impl RenderDevice
                 unsafe { mmap.slice_mut::<u8>(offset as _, buf.len()).copy_from_slice(buf); }
             }
         })?;
-        self.imm_submission(|mut rec|
+        Self::imm_transferring(|mut rec|
         {
             rec.pipeline_barrier(fe::PipelineStageFlags::ALL_COMMANDS, fe::PipelineStageFlags::TRANSFER, false, &[], &[], &initial_barriers);
             for (n, (nd, cp)) in copies.into_iter().enumerate()
@@ -437,6 +534,21 @@ impl RenderDevice
         let cp = fe::CommandPool::new(&RenderDeviceCore::get().device, RenderDeviceCore::get().graphics_queue.0, false, false)?;
         let commands = cp.alloc(count as _, false)?;
         Ok(RenderCommands(cp, commands))
+    }
+    pub fn get_builtin_vertex_array(&self, key: super::BuiltinResourceKey) -> fe::Result<VertexArray>
+    {
+        match key
+        {
+            super::BuiltinResourceKey::UnitRect => 
+            {
+                let bb = RenderDeviceCore::get().query_builtin_buffer();
+                Ok(VertexArray
+                {
+                    vb_desc: VertexBufferSlice { buf: bb, offset: BuiltinVertices::offset_unit_rect(), count: 4 },
+                    ib_desc: Some(IndexBufferSlice { buf: bb, offset: BuiltinIndices::offset_unit_rect(), format: fe::IndexType::U16, count: 6 })
+                })
+            }
+        }
     }
 }
 
@@ -566,7 +678,6 @@ impl RenderControl
         let next_index = Arc::new(AtomicUsize::new(Self::acquire_next_image_sync(Some(swapchain), &render_ready)
             .expect("Failure while acquiring initial index of buffer") as _));
         let ni_th = next_index.clone();
-        #[cfg(feature = "debug")] println!("Initial Index: {}", next_index.load(Ordering::Acquire));
         RenderControl
         {
             th: Some(::std::thread::Builder::new().name("RenderControl Fence Observer".into()).spawn(move ||
@@ -576,15 +687,12 @@ impl RenderControl
 
                 'mlp: loop
                 {
-                    #[cfg(feature = "debug")] println!("[RenderControl] waiting to begin acquire_next...");
                     loop
                     {
                         if Event::wait_any(&[&ev_acquire_next, &ev_thread_exit]) == Some(0) { ev_acquire_next.reset(); break; }
                         else { ev_thread_exit.reset(); break 'mlp; }
                     }
-                    #[cfg(feature = "debug")] println!("[RenderControl] acquiring next index...");
                     let next = Self::acquire_next_image_sync(None, &render_ready).expect("Failure while acquiring next index of buffer");
-                    #[cfg(feature = "debug")] println!("[RenderControl] acquired!");
                     ni_th.store(next as _, Ordering::Release);
                     render_ready_flag.store(true, Ordering::Release);
                     ev_render_ready.set();
@@ -673,4 +781,18 @@ impl<'d> super::RenderCommandsBasic for CommandRecorder<'d>
             .end_render_pass(); }
         self.in_render_pass = false;
     }
+    fn draw(&mut self, vertices: &super::VertexArray, instance_count: usize)
+    {
+        let va = unsafe { &*(vertices as *const _ as *const VertexArray) };
+        self.rec.bind_vertex_buffers(0, &[(va.vb_desc.buf, va.vb_desc.offset)]);
+        if let Some(ref ib) = va.ib_desc
+        {
+            self.rec.bind_index_buffer(&ib.buf, ib.offset, ib.format);
+            self.rec.draw_indexed(ib.count as _, instance_count as _, 0, 0, 0);
+        }
+        else { self.rec.draw(va.vb_desc.count as _, instance_count as _, 0, 0); }
+    }
 }
+
+pub struct VertexArray<'b> { vb_desc: VertexBufferSlice<'b>, ib_desc: Option<IndexBufferSlice<'b>> }
+impl<'b> super::VertexArray for VertexArray<'b> {}

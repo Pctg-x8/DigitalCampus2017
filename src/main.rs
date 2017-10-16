@@ -1,5 +1,5 @@
 
-#![feature(box_syntax, placement_in_syntax, collection_placement)]
+#![feature(box_syntax, placement_in_syntax, collection_placement, const_fn)]
 
 #[macro_use] extern crate appinstance;
 extern crate libc;

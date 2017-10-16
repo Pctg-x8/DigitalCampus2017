@@ -121,11 +121,26 @@ impl RenderDevice
             RenderDevice::DirectX12(ref d) => unimplemented!()
         }
     }
+    pub fn get_builtin_vertex_array<'d>(&'d self, key: BuiltinResourceKey) -> Result<Box<VertexArray + 'd>, Box<Error>>
+    {
+        match *self
+        {
+            RenderDevice::Vulkan(ref d) => d.get_builtin_vertex_array(key).map(|x| box x as _).map_err(From::from),
+            #[cfg(windows)]
+            RenderDevice::DirectX12(_) => unimplemented!()
+        }
+    }
 
     pub(self) fn ensure_vk(&self) -> &vk::RenderDevice
     {
         match self { &RenderDevice::Vulkan(ref v) => v, _ => panic!("unexpected") }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinResourceKey
+{
+    UnitRect
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,6 +182,8 @@ pub trait RenderCommandsBasic
     fn prepare_render_targets(&mut self, targets: &[&RenderTarget]);
     fn set_render_target(&mut self, target: &RenderTarget);
     fn execute_subcommands_into(&mut self, target: &RenderTarget, subcommands: &[&CommandBuffer]);
+    fn draw(&mut self, vertices: &VertexArray, instance_count: usize);
 }
 pub trait RenderTarget {}
 pub trait CommandBuffer {}
+pub trait VertexArray {}
