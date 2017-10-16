@@ -132,16 +132,26 @@ impl RenderDevice
 pub struct BufferContent { pub kind: BufferKind, pub bytesize: usize }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BufferKind { Vertex, Index, Constant }
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TextureParam
+#[derive(Debug, PartialEq, Eq)]
+pub enum TextureUsage<'p>
 {
-    pub size: Size2U, pub layers: u32, pub color: ColorFormat, pub render_target: bool, pub require_staging: bool
+    Immutable(&'p [u8]), FrequentlyUpdated, RenderTarget
 }
-impl Default for TextureParam
+impl<'p> TextureUsage<'p>
+{
+    pub(self) fn is_immutable(&self) -> bool { match self { &TextureUsage::Immutable(_) => true, _ => false } }
+    pub(self) fn initial_pixels(&self) -> Option<&'p [u8]> { match self { &TextureUsage::Immutable(p) => Some(p), _ => None } }
+}
+#[derive(Debug, PartialEq, Eq)]
+pub struct TextureParam<'p>
+{
+    pub size: Size2U, pub layers: u32, pub color: ColorFormat, pub usage: TextureUsage<'p>
+}
+impl<'p> Default for TextureParam<'p>
 {
     fn default() -> Self
     {
-        TextureParam { size: Size2U(1, 1), layers: 1, color: ColorFormat::WithAlpha, render_target: false, require_staging: false }
+        TextureParam { size: Size2U(1, 1), layers: 1, color: ColorFormat::WithAlpha, usage: TextureUsage::FrequentlyUpdated }
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

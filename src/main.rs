@@ -1,5 +1,5 @@
 
-#![feature(box_syntax)]
+#![feature(box_syntax, placement_in_syntax, collection_placement)]
 
 #[macro_use] extern crate appinstance;
 extern crate libc;
@@ -17,7 +17,7 @@ extern crate mio;
 use ws_common::{NativeWindow, WindowServer};
 
 mod render;
-use render::{RenderDevice, TextureParam, ColorFormat};
+use render::{RenderDevice, TextureParam, ColorFormat, TextureUsage};
 use metrics::*;
 mod event;
 
@@ -38,7 +38,7 @@ impl WelcomeSceneRender
         let (w, h) = p_logo_encoded.dimensions();
         println!("The university logo loaded: size = {}x{} estimatedSize = {} bytes", w, h, w * h);
         let res = RenderDevice::get().create_resources(&[], &[
-            TextureParam { size: Size2U(w, h), color: ColorFormat::Grayscale, require_staging: true, .. Default::default() }
+            TextureParam { size: Size2U(w, h), color: ColorFormat::Grayscale, usage: TextureUsage::Immutable(p_logo_encoded.as_luma8().unwrap()), .. Default::default() }
         ]).expect("Failed to create some resources");
         RenderDevice::get().update_render_commands(|rec, n|
         {

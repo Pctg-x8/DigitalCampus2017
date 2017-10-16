@@ -197,6 +197,18 @@ impl RenderDevice
             present_ready: fe::Semaphore::new(&core.device).expect("Failed to create a semaphore(present_ready)")
         })
     }
+
+    fn imm_submission<F: FnOnce(fe::CmdRecord)>(&self, recorder: F) -> fe::Result<()>
+    {
+        let core = RenderDeviceCore::get();
+        let cpt = fe::CommandPool::new(&core.device, core.graphics_queue.0, true, false)?;
+        let init_c = cpt.alloc(1, true)?; recorder(init_c[0].begin()?);
+        core.graphics_queue.1.submit(&[fe::SubmissionBatch
+        {
+            command_buffers: Cow::Borrowed(&[&init_c[0]]), .. Default::default()
+        }], None)?;
+        core.device.wait()
+    }
 }
 
 impl RenderDevice
@@ -238,46 +250,125 @@ impl RenderDevice
         }
         else { (None, None) };
         let (bufalloc, sbufalloc) = (buffer.as_ref().map(MemoryBound::requirements), sbuffer.as_ref().map(MemoryBound::requirements));
-        let mut texture_bytes = 0;
-        let tdp: Vec<_> = texture_data.into_iter().scan(0, |current_offset, &super::TextureParam { size, layers, color, render_target, require_staging }|
+
+        // collect textures //
+        let (mut initial_barriers, mut final_barriers) = (Vec::with_capacity(texture_data.len() * 3), Vec::with_capacity(texture_data.len()));
+        let mut tdp = Vec::with_capacity(texture_data.len());
+        let mut current_offset = 0;
+        for param in texture_data
         {
-            let mut usage = if render_target { fe::ImageUsage::COLOR_ATTACHMENT } else { fe::ImageUsage::SAMPLED };
-            if require_staging { usage = usage.transfer_dest(); }
-            Some(fe::ImageDesc::new(fe::Extent2D(size.x(), size.y()), color.translate_vk(), usage, fe::ImageLayout::Preinitialized)
-                .array_layers(layers).create(&RenderDeviceCore::get().device).map(|o|
+            let object = fe::ImageDesc::new(fe::Extent2D(param.size.x(), param.size.y()), param.color.translate_vk(),
+                param.usage.translate_vk(), fe::ImageLayout::Preinitialized)
+                .array_layers(param.layers).create(&RenderDeviceCore::get().device)?;
+            let req = object.requirements();
+            let offset = alignment(current_offset, req.alignment);
+            current_offset = offset + req.size;
+            initial_barriers.place_back() <- fe::vk::VkImageMemoryBarrier
+            {
+                oldLayout: fe::ImageLayout::Preinitialized as _, newLayout: match param.usage
                 {
-                    let req = o.requirements();
-                    let offset = alignment(*current_offset, req.alignment);
-                    *current_offset = offset + req.size;
-                    texture_bytes = *current_offset;
-                    TexturePlacement { offset, object: o }
-                }))
-        }).collect::<fe::Result<_>>()?;
-        let mut stexture_bytes = 0;
-        let tdps: Vec<_> = texture_data.into_iter().filter(|p| p.require_staging && !p.render_target).scan(0, |current_offset, &super::TextureParam { size, layers, color, .. }|
-        {
-            Some(fe::ImageDesc::new(fe::Extent2D(size.x(), size.y()), color.translate_vk(), fe::ImageUsage::TRANSFER_SRC, fe::ImageLayout::Preinitialized)
-                .use_linear_tiling().array_layers(layers).create(&RenderDeviceCore::get().device).map(|o|
+                    super::TextureUsage::RenderTarget => fe::ImageLayout::ShaderReadOnlyOpt,
+                    super::TextureUsage::FrequentlyUpdated | super::TextureUsage::Immutable(_) => fe::ImageLayout::TransferDestOpt,
+                } as _,
+                dstAccessMask: match param.usage
                 {
-                    let req = o.requirements();
-                    let offset = alignment(*current_offset, req.alignment);
-                    *current_offset = offset + req.size;
-                    stexture_bytes = *current_offset;
-                    TexturePlacement { offset, object: o }
-                }))
-        }).collect::<fe::Result<_>>()?;
+                    super::TextureUsage::RenderTarget => fe::vk::VK_ACCESS_SHADER_READ_BIT,
+                    super::TextureUsage::FrequentlyUpdated | super::TextureUsage::Immutable(_) => fe::vk::VK_ACCESS_TRANSFER_WRITE_BIT
+                },
+                image: object.native_ptr(), subresourceRange: fe::vk::VkImageSubresourceRange { aspectMask: fe::AspectMask::COLOR.0, .. Default::default() },
+                .. Default::default()
+            };
+            tdp.place_back() <- TexturePlacement { offset, object };
+        }
+        let texture_bytes = current_offset;
         let buffer_base = alignment(texture_bytes, bufalloc.map(|x| x.alignment).unwrap_or(1));
-        let sbuffer_base = alignment(stexture_bytes, sbufalloc.map(|x| x.alignment).unwrap_or(1));
         let memory = fe::DeviceMemory::allocate(&RenderDeviceCore::get().device, (buffer_base + buffer_size) as _, RenderDeviceCore::get().memindices.devlocal)?;
-        let smemory = fe::DeviceMemory::allocate(&RenderDeviceCore::get().device, (sbuffer_base + buffer_size) as _, RenderDeviceCore::get().memindices.host)?;
         if let Some(ref b) = buffer.as_ref() { b.bind(&memory, buffer_base as _)?; }
-        if let Some(ref b) = sbuffer.as_ref() { b.bind(&smemory, sbuffer_base as _)?; }
         let mut image = Vec::with_capacity(tdp.len());
         for TexturePlacement { object, offset } in tdp
         {
             object.bind(&memory, offset as _)?; image.push(object);
         }
+
+        // collect staging textures //
+        let mut current_offset = 0;
+        let mut tdps = Vec::with_capacity(texture_data.len());
+        for param in texture_data.iter().filter(|p| p.usage == super::TextureUsage::FrequentlyUpdated)
+        {
+            let object = fe::ImageDesc::new(fe::Extent2D(param.size.x(), param.size.y()), param.color.translate_vk(),
+                fe::ImageUsage::TRANSFER_SRC, fe::ImageLayout::Preinitialized)
+                .use_linear_tiling().array_layers(param.layers).create(&RenderDeviceCore::get().device)?;
+            let req = object.requirements();
+            let offset = alignment(current_offset, req.alignment);
+            current_offset = offset + req.size;
+            initial_barriers.place_back() <- fe::vk::VkImageMemoryBarrier
+            {
+                oldLayout: fe::ImageLayout::Preinitialized as _, newLayout: fe::ImageLayout::TransferSrcOpt as _,
+                dstAccessMask: fe::vk::VK_ACCESS_TRANSFER_READ_BIT, image: object.native_ptr(),
+                subresourceRange: fe::vk::VkImageSubresourceRange { aspectMask: fe::AspectMask::COLOR.0, .. Default::default() },
+                .. Default::default()
+            };
+            tdps.place_back() <- TexturePlacement { offset, object };
+        }
+        let stexture_bytes = current_offset;
+        let sbuffer_base = alignment(stexture_bytes, sbufalloc.map(|x| x.alignment).unwrap_or(1));
+        let smemory = fe::DeviceMemory::allocate(&RenderDeviceCore::get().device, (sbuffer_base + buffer_size) as _, RenderDeviceCore::get().memindices.host)?;
+        if let Some(ref b) = sbuffer.as_ref() { b.bind(&smemory, sbuffer_base as _)?; }
         for &TexturePlacement { ref object, offset } in &tdps { object.bind(&smemory, offset as _)?; }
+
+        // process temporary staging textures //
+        let mut current_offset = 0;
+        let mut tdpts = Vec::with_capacity(texture_data.len());
+        let mut copies = Vec::with_capacity(texture_data.len());
+        for (n, param) in texture_data.iter().enumerate().filter(|&(_, ref p)| p.usage.is_immutable())
+        {
+            let object = fe::ImageDesc::new(fe::Extent2D(param.size.x(), param.size.y()), param.color.translate_vk(),
+                fe::ImageUsage::TRANSFER_SRC, fe::ImageLayout::Preinitialized)
+                .use_linear_tiling().array_layers(param.layers).create(&RenderDeviceCore::get().device)?;
+            let req = object.requirements();
+            let offset = alignment(current_offset, req.alignment);
+            current_offset = offset + req.size;
+            initial_barriers.place_back() <- fe::vk::VkImageMemoryBarrier
+            {
+                oldLayout: fe::ImageLayout::Preinitialized as _, newLayout: fe::ImageLayout::TransferSrcOpt as _,
+                dstAccessMask: fe::vk::VK_ACCESS_TRANSFER_READ_BIT, image: object.native_ptr(),
+                subresourceRange: fe::vk::VkImageSubresourceRange { aspectMask: fe::AspectMask::COLOR.0, .. Default::default() },
+                .. Default::default()
+            };
+            final_barriers.place_back() <- fe::vk::VkImageMemoryBarrier
+            {
+                oldLayout: fe::ImageLayout::TransferDestOpt as _, newLayout: fe::ImageLayout::ShaderReadOnlyOpt as _,
+                srcAccessMask: fe::vk::VK_ACCESS_TRANSFER_WRITE_BIT, dstAccessMask: fe::vk::VK_ACCESS_SHADER_READ_BIT,
+                image: image[n].native_ptr(), subresourceRange: fe::vk::VkImageSubresourceRange { aspectMask: fe::AspectMask::COLOR.0, .. Default::default() },
+                .. Default::default()
+            };
+            copies.place_back() <- (n, fe::vk::VkImageCopy
+            {
+                srcSubresource: fe::vk::VkImageSubresourceLayers { aspectMask: fe::AspectMask::COLOR.0, .. Default::default() },
+                dstSubresource: fe::vk::VkImageSubresourceLayers { aspectMask: fe::AspectMask::COLOR.0, .. Default::default() },
+                extent: AsRef::<fe::vk::VkExtent3D>::as_ref(object.size()).clone(), .. unsafe { ::std::mem::zeroed() }
+            });
+            tdpts.place_back() <- (TexturePlacement { offset, object }, param.usage.initial_pixels().unwrap());
+        }
+        let tstexture_bytes = current_offset;
+        let tsmemory = fe::DeviceMemory::allocate(&RenderDeviceCore::get().device, tstexture_bytes as _, RenderDeviceCore::get().memindices.host)?;
+        for &(TexturePlacement { ref object, offset }, _) in &tdpts { object.bind(&tsmemory, offset as _)?; }
+        tsmemory.map(0 .. tstexture_bytes as _).map(|mmap|
+        {
+            for &(TexturePlacement { offset, .. }, buf) in &tdpts
+            {
+                unsafe { mmap.slice_mut::<u8>(offset as _, buf.len()).copy_from_slice(buf); }
+            }
+        })?;
+        self.imm_submission(|mut rec|
+        {
+            rec.pipeline_barrier(fe::PipelineStageFlags::ALL_COMMANDS, fe::PipelineStageFlags::TRANSFER, false, &[], &[], &initial_barriers);
+            for (n, (nd, cp)) in copies.into_iter().enumerate()
+            {
+                rec.copy_image(&tdpts[n].0.object, fe::ImageLayout::TransferSrcOpt, &image[nd], fe::ImageLayout::TransferDestOpt, &[cp]);
+            }
+            rec.pipeline_barrier(fe::PipelineStageFlags::TRANSFER, fe::PipelineStageFlags::ALL_COMMANDS, false, &[], &[], &final_barriers);
+        })?;
 
         Ok(ResourceBlock { memory, smemory, buffer, sbuffer, image, simage: tdps })
     }
@@ -370,6 +461,18 @@ impl ResourceAfterUsage
     }
 }
 
+impl<'p> super::TextureUsage<'p>
+{
+    fn translate_vk(&self) -> fe::ImageUsage
+    {
+        match *self
+        {
+            super::TextureUsage::RenderTarget => fe::ImageUsage::SAMPLED.color_attachment(),
+            super::TextureUsage::FrequentlyUpdated => fe::ImageUsage::SAMPLED.transfer_dest(),
+            super::TextureUsage::Immutable(_) => fe::ImageUsage::SAMPLED.transfer_dest()
+        }
+    }
+}
 impl super::BufferKind
 {
     fn translate_vk(self) -> fe::BufferUsage
