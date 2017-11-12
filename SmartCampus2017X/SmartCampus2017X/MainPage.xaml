@@ -2,12 +2,62 @@
 <ContentPage xmlns="http://xamarin.com/schemas/2014/forms"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:local="clr-namespace:SmartCampus2017X"
-             x:Class="SmartCampus2017X.MainPage">
+             x:Class="SmartCampus2017X.MainPage"
+             Title="Timetable@SmartCampus2017">
+    <ContentPage.Resources>
+        <ResourceDictionary>
+            <ControlTemplate x:Key="TimetableCell">
+                <StackLayout BackgroundColor="White" Orientation="Vertical" IsClippedToBounds="True">
+                    <Label FontSize="Default" TextColor="Black" Text="{TemplateBinding BindingContext.Name}" LineBreakMode="NoWrap" />
+                    <Label FontSize="Small" Text="{TemplateBinding BindingContext.RoomInfo}" />
+                </StackLayout>
+            </ControlTemplate>
+        </ResourceDictionary>
+    </ContentPage.Resources>
     <ContentPage.Content>
-        <StackLayout>
-            <Label Text="Welcome to Xamarin.Forms!"
-                VerticalOptions="CenterAndExpand" 
-                HorizontalOptions="CenterAndExpand" />
-        </StackLayout>
+        <Grid Margin="8" BackgroundColor="LightGray" VerticalOptions="Start" ColumnSpacing="1" RowSpacing="1" Padding="1" x:Name="Timetable">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="auto" />
+                <RowDefinition Height="auto" />
+                <RowDefinition Height="auto" />
+                <RowDefinition Height="auto" />
+                <RowDefinition Height="auto" />
+                <RowDefinition Height="auto" />
+                <RowDefinition Height="auto" />
+                <RowDefinition Height="auto" />
+                <RowDefinition Height="auto" />
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <WebView WidthRequest="0" HeightRequest="0" IsVisible="False" Grid.Column="0" Grid.Row="0" x:Name="BackgroundWeb" />
+            <BoxView HorizontalOptions="Fill" VerticalOptions="Fill" WidthRequest="1" HeightRequest="1" Grid.Column="0" Grid.Row="0" BackgroundColor="White" />
+            <Label BackgroundColor="White" Grid.Column="1" Grid.Row="0" Text="Mon" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+            <Label BackgroundColor="White" Grid.Column="2" Grid.Row="0" Text="Tue" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+            <Label BackgroundColor="White" Grid.Column="3" Grid.Row="0" Text="Wed" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+            <Label BackgroundColor="White" Grid.Column="4" Grid.Row="0" Text="Thu" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+            <Label BackgroundColor="White" Grid.Column="5" Grid.Row="0" Text="Fri" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+            <Label BackgroundColor="White" Grid.Column="6" Grid.Row="0" Text="Sat" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+            <Label BackgroundColor="White" Grid.Column="0" Grid.Row="1" Text="1" FontAttributes="Bold" VerticalTextAlignment="Center" />
+            <Label BackgroundColor="White" Grid.Column="0" Grid.Row="2" Text="2" FontAttributes="Bold" VerticalTextAlignment="Center" />
+            <Label BackgroundColor="White" Grid.Column="0" Grid.Row="3" Text="3" FontAttributes="Bold" VerticalTextAlignment="Center" />
+            <Label BackgroundColor="White" Grid.Column="0" Grid.Row="4" Text="4" FontAttributes="Bold" VerticalTextAlignment="Center" />
+            <Label BackgroundColor="White" Grid.Column="0" Grid.Row="5" Text="5" FontAttributes="Bold" VerticalTextAlignment="Center" />
+            <Label BackgroundColor="White" Grid.Column="0" Grid.Row="6" Text="6" FontAttributes="Bold" VerticalTextAlignment="Center" />
+            <Label BackgroundColor="White" Grid.Column="0" Grid.Row="7" Text="7" FontAttributes="Bold" VerticalTextAlignment="Center" />
+            <Label BackgroundColor="White" Grid.Column="0" Grid.Row="8" Text="8" FontAttributes="Bold" VerticalTextAlignment="Center" />
+
+            <ContentView ControlTemplate="{StaticResource Key=TimetableCell}" Grid.Row="1" Grid.Column="1" />
+            <ContentView ControlTemplate="{StaticResource Key=TimetableCell}" Grid.Row="2" Grid.Column="1" />
+            <ContentView ControlTemplate="{StaticResource Key=TimetableCell}" Grid.Row="3" Grid.Column="1" Grid.RowSpan="2" />
+            <ContentView ControlTemplate="{StaticResource Key=TimetableCell}" Grid.Row="6" Grid.Column="1" />
+        </Grid>
     </ContentPage.Content>
 </ContentPage>
