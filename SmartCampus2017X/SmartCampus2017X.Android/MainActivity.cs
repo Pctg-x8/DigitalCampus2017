@@ -14,6 +14,7 @@ using Android.Content;
 using System.Reactive.Linq;
 using Android.Graphics.Drawables;
 using Android.Graphics;
+using System.Reactive;
 
 namespace SmartCampus2017X.Droid
 {
@@ -32,8 +33,8 @@ namespace SmartCampus2017X.Droid
             global::Xamarin.Forms.Forms.Init(this, bundle);
             LoadApplication(new App());
 
-            this.ScraperMain = new WebViewWithEvent(new WebView(this));
-            this.ScraperSub  = new WebViewWithEvent(new WebView(this));
+            this.ScraperMain = new WebViewWithEvent(new WebView(this), "main");
+            this.ScraperSub  = new WebViewWithEvent(new WebView(this), "sub");
 
             this.ScraperMain.view.Visibility = ViewStates.Visible;
             this.SetContentView(this.ScraperMain.view);
@@ -47,8 +48,19 @@ namespace SmartCampus2017X.Droid
             while (!await this.TryAccessHomepage(loginKeys)) loginKeys = await this.ProcessLoginInput();
             Log.Debug("app", "CampusHomepage loaded?");
             var mainController = new RemoteCampus.Controller(this.ScraperMain);
+            var subController = new RemoteCampus.Controller(this.ScraperSub);
+
             var homemenu = new RemoteCampus.HomeMenuControl();
-            await homemenu.AccessIntersys(mainController);
+            var f = await homemenu.AccessIntersys(mainController);
+            var intersys = await f.ContentControlTo(mainController, this.ScraperMain);
+            var fc = await intersys.AccessCourseCategory(mainController);
+            /*// 最初はblankになっているのでちょっと特殊(onloadを待って、フレーム名.location.hrefを取ってアクセス)
+            await this.ScraperMain.WaitPageLoadingCompletedAsync();
+            var jloc = await mainController.QueryAsync<Java.Lang.String>($"MainFrame.location.href");
+            this.ScraperMain.Navigate(jloc.Substring(1, jloc.Length() - 1)); await this.ScraperMain.PageLoadedUrlAsync();
+            var course = fc.ContentControl;*/
+            var course = await fc.ContentControlTo(mainController, this.ScraperMain);
+            var cdetails = await course.AccessDetails(mainController);
         }
         private async Task<bool> TryAccessHomepage((string, string)? loginKeys)
         {
@@ -104,8 +116,9 @@ namespace SmartCampus2017X.Droid
     {
         public readonly WebView view;
         private WebEventReceiver events;
+        private WebChromeEventReceiver chEvents;
 
-        public WebViewWithEvent(WebView v)
+        public WebViewWithEvent(WebView v, string DebugName)
         {
             this.events = new WebEventReceiver();
             this.view = v;
@@ -113,8 +126,10 @@ namespace SmartCampus2017X.Droid
             this.view.Settings.JavaScriptEnabled = true;
             this.view.Settings.LoadsImagesAutomatically = false;
             this.view.SetWebViewClient(this.events);
+            this.view.SetWebChromeClient(this.chEvents = new WebChromeEventReceiver(DebugName));
         }
         public async Task<string> PageLoadedUrlAsync() => await this.events.LoadingFinished.FirstAsync();
+        public async Task WaitPageLoadingCompletedAsync() { await this.chEvents.OnLoadingCompleted.FirstAsync(); }
         public void Navigate(string url) { this.view.LoadUrl(url); }
         public void Evaluate(string js) { this.view.EvaluateJavascript(js, null); }
         public async Task<T> EvaluateAsync<T>(string js) where T: class, IJavaObject
@@ -155,6 +170,23 @@ namespace SmartCampus2017X.Droid
         }
 
         public async Task<string> PageLoadedUrlAsync() => await this.LoadingFinished.FirstAsync();
+    }
+    public class WebChromeEventReceiver : WebChromeClient
+    {
+        private readonly string DebugName;
+        public WebChromeEventReceiver(string dn) { this.DebugName = dn; }
+        public int lastProgress = 1000;
+        public IObservable<Unit> OnLoadingCompleted { get; private set; } = new Subject<Unit>();
+        public override void OnProgressChanged(WebView view, int newProgress)
+        {
+            base.OnProgressChanged(view, newProgress);
+            // Log.Debug($"ChromeEventReceiver@{DebugName}", $"Progress: {newProgress}");
+            if(lastProgress != newProgress)
+            {
+                lastProgress = newProgress;
+                if (newProgress == 100) (this.OnLoadingCompleted as Subject<Unit>).OnNext(new Unit());
+            }
+        }
     }
     class JSValueCallback : Java.Lang.Object, IValueCallback
     {
