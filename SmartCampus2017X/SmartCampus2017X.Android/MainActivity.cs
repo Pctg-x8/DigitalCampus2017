@@ -20,7 +20,8 @@ namespace SmartCampus2017X.Droid
     [Activity(Label = "SmartCampus2017X", Icon = "@drawable/icon", Theme = "@android:style/Theme.Material.Light.DarkActionBar", MainLauncher = true, ConfigurationChanges = ConfigChanges.ScreenSize | ConfigChanges.Orientation)]
     public class MainActivity : global::Xamarin.Forms.Platform.Android.FormsApplicationActivity
     {
-        private WebView wv;
+        public WebViewWithEvent ScraperMain { get; private set; }
+        public WebViewWithEvent ScraperSub  { get; private set; }
         protected override async void OnCreate(Bundle bundle)
         {
             /*TabLayoutResource = Resource.Layout.Tabbar;
@@ -31,11 +32,11 @@ namespace SmartCampus2017X.Droid
             global::Xamarin.Forms.Forms.Init(this, bundle);
             LoadApplication(new App());
 
-            this.wv = new WebView(this);
-            this.wv.Settings.JavaScriptEnabled = true;
-            this.wv.Settings.LoadsImagesAutomatically = false;
-            this.wv.Visibility = ViewStates.Invisible;
-            this.wv.SetWebViewClient(WebEventReceiver.Instance);
+            this.ScraperMain = new WebViewWithEvent(new WebView(this));
+            this.ScraperSub  = new WebViewWithEvent(new WebView(this));
+
+            this.ScraperMain.view.Visibility = ViewStates.Visible;
+            this.SetContentView(this.ScraperMain.view);
 
             await this.RunSession();
         }
@@ -45,6 +46,9 @@ namespace SmartCampus2017X.Droid
             (string, string)? loginKeys = null;
             while (!await this.TryAccessHomepage(loginKeys)) loginKeys = await this.ProcessLoginInput();
             Log.Debug("app", "CampusHomepage loaded?");
+            var mainController = new RemoteCampus.Controller(this.ScraperMain);
+            var homemenu = new RemoteCampus.HomeMenuControl();
+            await homemenu.AccessIntersys(mainController);
         }
         private async Task<bool> TryAccessHomepage((string, string)? loginKeys)
         {
@@ -53,17 +57,16 @@ namespace SmartCampus2017X.Droid
                 if (loginKeys.HasValue)
                 {
                     const string LoginFormID = "loginPage:formId:j_id33", LoginFormPass = "loginPage:formId:j_id34";
-                    this.wv.EvaluateJavascript($"document.querySelector('input[name=\"{LoginFormID}\"]').value = '{loginKeys.Value.Item1}'", null);
-                    this.wv.EvaluateJavascript($"with(document.querySelector('input[name=\"{LoginFormPass}\"]')) {{ value = '{loginKeys.Value.Item2}'; focus(); }}", null);
-                    this.wv.DispatchKeyEvent(new KeyEvent(KeyEventActions.Down, Keycode.Enter));
-                    this.wv.DispatchKeyEvent(new KeyEvent(KeyEventActions.Up, Keycode.Enter));
+                    this.ScraperMain.Evaluate($"document.querySelector('input[name=\"{LoginFormID}\"]').value = '{loginKeys.Value.Item1}'");
+                    this.ScraperMain.Evaluate($"with(document.querySelector('input[name=\"{LoginFormPass}\"]')) {{ value = '{loginKeys.Value.Item2}'; focus(); }}");
+                    this.ScraperMain.DispatchKeyClick(Keycode.Enter);
                 }
-                else this.wv.LoadUrl("https://dh.force.com/digitalCampus/campusHomepage");
+                else this.ScraperMain.Navigate("https://dh.force.com/digitalCampus/campusHomepage");
             });
 
             do
             {
-                var currentUrl = await WebEventReceiver.Instance.LoadingFinished.FirstAsync();
+                var currentUrl = await this.ScraperMain.PageLoadedUrlAsync();
                 Log.Debug("app", $"CurrentUrl: {currentUrl}");
                 if (currentUrl.Contains("campuslogin")) return false;
                 if (currentUrl.Contains("campusHomepage")) return true;
@@ -97,10 +100,38 @@ namespace SmartCampus2017X.Droid
                 .Create();
         }
     }
+    public class WebViewWithEvent
+    {
+        public readonly WebView view;
+        private WebEventReceiver events;
+
+        public WebViewWithEvent(WebView v)
+        {
+            this.events = new WebEventReceiver();
+            this.view = v;
+            this.view.Visibility = ViewStates.Invisible;
+            this.view.Settings.JavaScriptEnabled = true;
+            this.view.Settings.LoadsImagesAutomatically = false;
+            this.view.SetWebViewClient(this.events);
+        }
+        public async Task<string> PageLoadedUrlAsync() => await this.events.LoadingFinished.FirstAsync();
+        public void Navigate(string url) { this.view.LoadUrl(url); }
+        public void Evaluate(string js) { this.view.EvaluateJavascript(js, null); }
+        public async Task<T> EvaluateAsync<T>(string js) where T: class, IJavaObject
+        {
+            var c = new TaskCompletionSource<Java.Lang.Object>();
+            this.view.EvaluateJavascript(js, new JSValueCallback() { OnReceive = x => c.SetResult(x) });
+            return (await c.Task).JavaCast<T>();
+        }
+        public void DispatchKeyClick(Keycode code)
+        {
+            this.view.DispatchKeyEvent(new KeyEvent(KeyEventActions.Down, code));
+            this.view.DispatchKeyEvent(new KeyEvent(KeyEventActions.Up, code));
+        }
+    }
     public class WebEventReceiver : WebViewClient
     {
-        public static WebEventReceiver Instance { get; private set; } = new WebEventReceiver();
-
+        const long RedirectingDetectionThrottleTime = 100;
         private string loadingOverrided = null;
         public IObservable<string> LoadingFinished { get; private set; } = new Subject<string>();
         public override void OnPageFinished(WebView view, string url)
@@ -113,7 +144,7 @@ namespace SmartCampus2017X.Droid
                     (this.LoadingFinished as Subject<string>).OnNext(url);
                     this.loadingOverrided = null;
                 }
-            }, 100);
+            }, RedirectingDetectionThrottleTime);
             base.OnPageFinished(view, url);
         }
         public override bool ShouldOverrideUrlLoading(WebView view, IWebResourceRequest request)
@@ -122,6 +153,13 @@ namespace SmartCampus2017X.Droid
             this.loadingOverrided = request.Url.ToString();
             return false;
         }
+
+        public async Task<string> PageLoadedUrlAsync() => await this.LoadingFinished.FirstAsync();
+    }
+    class JSValueCallback : Java.Lang.Object, IValueCallback
+    {
+        public Action<Java.Lang.Object> OnReceive;
+        public void OnReceiveValue(Java.Lang.Object value) { this.OnReceive(value); }
     }
 }
 
