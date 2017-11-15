@@ -23,7 +23,8 @@ namespace SmartCampus2017X.Droid
     {
         public WebViewWithEvent ScraperMain { get; private set; }
         public WebViewWithEvent ScraperSub  { get; private set; }
-        protected override async void OnCreate(Bundle bundle)
+        public App appCommon;
+        protected override void OnCreate(Bundle bundle)
         {
             /*TabLayoutResource = Resource.Layout.Tabbar;
             ToolbarResource = Resource.Layout.Toolbar;
@@ -31,18 +32,18 @@ namespace SmartCampus2017X.Droid
             base.OnCreate(bundle);
 
             global::Xamarin.Forms.Forms.Init(this, bundle);
-            LoadApplication(new App());
+            LoadApplication(this.appCommon = new App());
 
             this.ScraperMain = new WebViewWithEvent(new WebView(this), "main");
             this.ScraperSub  = new WebViewWithEvent(new WebView(this), "sub");
 
-            this.ScraperMain.view.Visibility = ViewStates.Visible;
-            this.SetContentView(this.ScraperMain.view);
+            /*this.ScraperMain.view.Visibility = ViewStates.Visible;
+            this.SetContentView(this.ScraperMain.view);*/
 
-            await this.RunSession();
+            this.RunSession();
         }
 
-        private async Task RunSession()
+        private async void RunSession()
         {
             (string, string)? loginKeys = null;
             while (!await this.TryAccessHomepage(loginKeys)) loginKeys = await this.ProcessLoginInput();
@@ -54,13 +55,10 @@ namespace SmartCampus2017X.Droid
             var f = await homemenu.AccessIntersys(mainController);
             var intersys = await f.ContentControlTo(mainController, this.ScraperMain);
             var fc = await intersys.AccessCourseCategory(mainController);
-            /*// 最初はblankになっているのでちょっと特殊(onloadを待って、フレーム名.location.hrefを取ってアクセス)
-            await this.ScraperMain.WaitPageLoadingCompletedAsync();
-            var jloc = await mainController.QueryAsync<Java.Lang.String>($"MainFrame.location.href");
-            this.ScraperMain.Navigate(jloc.Substring(1, jloc.Length() - 1)); await this.ScraperMain.PageLoadedUrlAsync();
-            var course = fc.ContentControl;*/
             var course = await fc.ContentControlTo(mainController, this.ScraperMain);
             var cdetails = await course.AccessDetails(mainController);
+            var courses = await cdetails.ParseCourseTable(mainController);
+            this.RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateCells(courses));
         }
         private async Task<bool> TryAccessHomepage((string, string)? loginKeys)
         {
@@ -81,7 +79,7 @@ namespace SmartCampus2017X.Droid
                 var currentUrl = await this.ScraperMain.PageLoadedUrlAsync();
                 Log.Debug("app", $"CurrentUrl: {currentUrl}");
                 if (currentUrl.Contains("campuslogin")) return false;
-                if (currentUrl.Contains("campusHomepage")) return true;
+                if (currentUrl.Contains("digitalCampus/campusHomepage")) return true;
             } while (true);
         }
         private async Task<(string, string)?> ProcessLoginInput()

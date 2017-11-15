@@ -13,6 +13,8 @@ using Android.Webkit;
 using System.Threading.Tasks;
 using Java.Lang;
 using Android.Util;
+using Newtonsoft.Json;
+using System.Web;
 
 namespace SmartCampus2017X.Droid.RemoteCampus
 {
@@ -93,7 +95,7 @@ namespace SmartCampus2017X.Droid.RemoteCampus
             public async Task<Content> ContentControlTo(Controller framed, WebViewWithEvent view)
             {
                 var src = await framed.QueryAsync<Java.Lang.String>("document.querySelector('frame[name=\"MainFrame\"]').getAttribute('src')");
-                var url = src.Substring(1, src.Length() - 1); Log.Debug("app::CampusPlan::Frame", $"ContentUrl: {url}");
+                var url = src.Substring(1, src.Length() - 1);
                 view.Evaluate($"location.href = '{url}';"); await view.PageLoadedUrlAsync();
                 return this.ContentControl;
             }
@@ -117,7 +119,7 @@ namespace SmartCampus2017X.Droid.RemoteCampus
             public async Task<Content> ContentControlTo(Controller framed, WebViewWithEvent view)
             {
                 var src = await framed.QueryAsync<Java.Lang.String>("MainFrame.location.href");
-                var url = src.Substring(1, src.Length() - 1); Log.Debug("app::CampusPlan::Frame", $"ContentUrl: {url}");
+                var url = src.Substring(1, src.Length() - 1);
                 view.Evaluate($"location.href = '{url}';"); await view.PageLoadedUrlAsync();
                 return this.ContentControl;
             }
@@ -126,6 +128,7 @@ namespace SmartCampus2017X.Droid.RemoteCampus
         /// メニューなし(トップページ)
         /// </summary>
         public sealed class EmptyMenu { }
+        // これいる？
         public sealed class Menu
         {
             const string CourseLinkID = "#dtlstMenu__ctl0_lbtnSystemName";
@@ -164,7 +167,38 @@ namespace SmartCampus2017X.Droid.RemoteCampus
         }
         public sealed class CourseDetailsPage
         {
-            // ちょっとまってね
+            // ちょっとまってね}
+
+            /// <summary>
+            /// 履修テーブルの取得(詳しくはRust側コードを参照)
+            /// </summary>
+            public async Task<SmartCampus2017X.RemoteCampus.CourseSet> ParseCourseTable(Controller c)
+            {
+                const string Functions = @"
+function null_or_trim(t) { return (!t) ? null : t.textContent.trim(); }
+function take_link(k) { return null_or_trim(k.querySelector('a')); }
+function take_cell(k) { var link = take_link(k); if(!link) return null; else return { name: link, roominfo: null_or_trim(k.querySelectorAll('.text-kogi-detail')[4]) }; }
+";
+                const string Komas = @"var tables = document.querySelectorAll('table.rishu-tbl-cell'); tables = [tables[3], tables[5]];
+var komas = tables.map(koma => koma.querySelectorAll('td.rishu-tbl-cell'));";
+                string Q = $@"{Functions} {Komas}
+var first_quarter = [], last_quarter = [];
+for(var i = 0; i < komas[0].length; i += 6)
+{{
+    first_quarter.push({{
+        monday:   take_cell(komas[0][i + 0]), tuesday: take_cell(komas[0][i + 1]), wednesday: take_cell(komas[0][i + 2]),
+        thursday: take_cell(komas[0][i + 3]), friday:  take_cell(komas[0][i + 4]), saturday:  take_cell(komas[0][i + 5])
+    }});
+    last_quarter.push({{
+        monday:   take_cell(komas[1][i + 0]), tuesday: take_cell(komas[1][i + 1]), wednesday: take_cell(komas[1][i + 2]),
+        thursday: take_cell(komas[1][i + 3]), friday:  take_cell(komas[1][i + 4]), saturday:  take_cell(komas[1][i + 5])
+    }});
+}}
+({{ firstQuarter: first_quarter, lastQuarter: last_quarter }})";
+                var json_j = await c.QueryAsync<Java.Lang.String>(Q);
+                Log.Debug("CourseDetailsPage", $"parsing {json_j.ToString()}");
+                return JsonConvert.DeserializeObject<SmartCampus2017X.RemoteCampus.CourseSet>(json_j.ToString());
+            }
         }
     }
 }

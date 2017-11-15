@@ -54,10 +54,10 @@
             <Label BackgroundColor="White" Grid.Column="0" Grid.Row="7" Text="7" FontAttributes="Bold" VerticalTextAlignment="Center" />
             <Label BackgroundColor="White" Grid.Column="0" Grid.Row="8" Text="8" FontAttributes="Bold" VerticalTextAlignment="Center" />
 
-            <ContentView ControlTemplate="{StaticResource Key=TimetableCell}" Grid.Row="1" Grid.Column="1" />
+            <!--<ContentView ControlTemplate="{StaticResource Key=TimetableCell}" Grid.Row="1" Grid.Column="1" />
             <ContentView ControlTemplate="{StaticResource Key=TimetableCell}" Grid.Row="2" Grid.Column="1" />
             <ContentView ControlTemplate="{StaticResource Key=TimetableCell}" Grid.Row="3" Grid.Column="1" Grid.RowSpan="2" />
-            <ContentView ControlTemplate="{StaticResource Key=TimetableCell}" Grid.Row="6" Grid.Column="1" />
+            <ContentView ControlTemplate="{StaticResource Key=TimetableCell}" Grid.Row="6" Grid.Column="1" />-->
         </Grid>
     </ContentPage.Content>
 </ContentPage>
