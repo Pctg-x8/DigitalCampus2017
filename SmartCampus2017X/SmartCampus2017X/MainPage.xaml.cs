@@ -53,5 +53,16 @@ namespace SmartCampus2017X
                 }
             }
         }
+
+        public async void DisplayClassInfo(object sender, EventArgs e)
+        {
+            var c = (sender as StackLayout).Parent.BindingContext as TimetableCellData;
+            await DisplayAlert(c.Name, c.RoomInfo, "close");
+        }
+        
+        private void TapGestureRecognizer_Tapped(object sender, EventArgs e)
+        {
+            this.DisplayClassInfo(sender, e);
+        }
     }
 }

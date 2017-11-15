@@ -8,6 +8,9 @@
         <ResourceDictionary>
             <ControlTemplate x:Key="TimetableCell">
                 <StackLayout BackgroundColor="White" Orientation="Vertical" IsClippedToBounds="True">
+                    <StackLayout.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="TapGestureRecognizer_Tapped" />
+                    </StackLayout.GestureRecognizers>
                     <Label FontSize="Default" TextColor="Black" Text="{TemplateBinding BindingContext.Name}" LineBreakMode="NoWrap" />
                     <Label FontSize="Small" Text="{TemplateBinding BindingContext.RoomInfo}" />
                 </StackLayout>
