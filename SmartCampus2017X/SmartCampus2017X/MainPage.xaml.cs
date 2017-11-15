@@ -18,7 +18,7 @@ namespace SmartCampus2017X
     public class MainPageViewModel : INotifyPropertyChanged
     {
         public event PropertyChangedEventHandler PropertyChanged;
-        private void RaisePropertyChanged(string propertyName) { if (this.PropertyChanged != null) this.PropertyChanged(this, new PropertyChangedEventArgs(propertyName)); }
+        private void RaisePropertyChanged(string propertyName) { this.PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName)); }
 
         private bool isRetrievingData = true;
         public bool IsRetrievingData
