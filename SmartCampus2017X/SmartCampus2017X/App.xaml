@@ -1,10 +1,14 @@
 ﻿<?xml version="1.0" encoding="utf-8" ?>
 <Application xmlns="http://xamarin.com/schemas/2014/forms"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="SmartCampus2017X.App">
-	<Application.Resources>
+             x:Class="SmartCampus2017X.App"
+             xmlns:converters="clr-namespace:SmartCampus2017X.Converters">
+    <Application.Resources>
 
-		<!-- Application resource dictionary -->
+        <!-- Application resource dictionary -->
+        <ResourceDictionary>
+            <converters:NegativeBoolConverter x:Key="NegativeBoolConverter" />
+        </ResourceDictionary>
 
-	</Application.Resources>
+    </Application.Resources>
 </Application>

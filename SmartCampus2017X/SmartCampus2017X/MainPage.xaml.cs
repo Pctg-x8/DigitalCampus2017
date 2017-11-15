@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -14,16 +15,33 @@ namespace SmartCampus2017X
         public string RoomInfo { get => this.room; }
         public TimetableCellData(string name, string room) { this.name = name; this.room = room; }
     }
+    public class MainPageViewModel : INotifyPropertyChanged
+    {
+        public event PropertyChangedEventHandler PropertyChanged;
+        private void RaisePropertyChanged(string propertyName) { if (this.PropertyChanged != null) this.PropertyChanged(this, new PropertyChangedEventArgs(propertyName)); }
+
+        private bool isRetrievingData = true;
+        public bool IsRetrievingData
+        {
+            get => isRetrievingData;
+            set
+            {
+                this.isRetrievingData = value;
+                this.RaisePropertyChanged("IsRetrievingData");
+            }
+        }
+    }
     public partial class MainPage : ContentPage
     {
         enum Week : int
         {
             Mon = 1, Tue = 2, Wed = 3, Thu = 4, Fri = 5, Sat = 6
         }
+        private MainPageViewModel vm;
         public MainPage()
         {
             InitializeComponent();
-
+            this.BindingContext = this.vm = new MainPageViewModel();
             // this.AddCellAt("サンプル講義A 概論", "E15-17", Week.Wed, 2);
         }
 
@@ -52,6 +70,7 @@ namespace SmartCampus2017X
                     else this.AddCellAt(c.Name, c.RoomInfo, (Week)col, row);
                 }
             }
+            this.vm.IsRetrievingData = false;
         }
 
         public async void DisplayClassInfo(object sender, EventArgs e)
