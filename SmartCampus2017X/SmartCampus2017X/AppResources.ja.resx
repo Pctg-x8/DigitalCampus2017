@@ -120,6 +120,12 @@
   <data name="retrieving" xml:space="preserve">
     <value>個人時間割を取得中です...</value>
   </data>
+  <data name="st_accessing" xml:space="preserve">
+    <value>ページを開いています...</value>
+  </data>
+  <data name="st_logging" xml:space="preserve">
+    <value>ログイン中です...</value>
+  </data>
   <data name="week_fri" xml:space="preserve">
     <value>金</value>
   </data>

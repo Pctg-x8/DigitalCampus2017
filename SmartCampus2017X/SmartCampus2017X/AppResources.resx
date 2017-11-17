@@ -120,6 +120,12 @@
   <data name="retrieving" xml:space="preserve">
     <value>Retrieving personal timeline...</value>
   </data>
+  <data name="st_accessing" xml:space="preserve">
+    <value>Accessing page... step</value>
+  </data>
+  <data name="st_logging" xml:space="preserve">
+    <value>Logging in...</value>
+  </data>
   <data name="week_fri" xml:space="preserve">
     <value>Fri</value>
   </data>

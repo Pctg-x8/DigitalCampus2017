@@ -10,9 +10,9 @@ namespace SmartCampus2017X
 {
     public class TimetableCellData
     {
-        private string name, room;
-        public string Name { get => this.name; }
-        public string RoomInfo { get => this.room; }
+        private readonly string name, room;
+        public string Name => this.name;
+        public string RoomInfo => this.room;
         public TimetableCellData(string name, string room) { this.name = name; this.room = room; }
     }
     public class MainPageViewModel : INotifyPropertyChanged
@@ -30,6 +30,16 @@ namespace SmartCampus2017X
                 this.RaisePropertyChanged("IsRetrievingData");
             }
         }
+        private string acquiringState = AppResources.st_logging;
+        public string AcquiringState
+        {
+            get => this.acquiringState;
+            set
+            {
+                this.acquiringState = value;
+                this.RaisePropertyChanged("AcquiringState");
+            }
+        }
     }
     public partial class MainPage : ContentPage
     {
@@ -45,6 +55,10 @@ namespace SmartCampus2017X
             // this.AddCellAt("サンプル講義A 概論", "E15-17", Week.Wed, 2);
         }
 
+        public void UpdateAccessingStep(int current, int max)
+        {
+            this.vm.AcquiringState = $"{AppResources.st_accessing} {current}/{max}";
+        }
         private void AddCellAt(string name, string roomInfo, Week week, int row)
         {
             var cv = new ContentView()

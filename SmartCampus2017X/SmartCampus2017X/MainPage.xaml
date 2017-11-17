@@ -24,6 +24,7 @@
                 <StackLayout Orientation="Vertical" HorizontalOptions="Fill" IsVisible="{Binding Path=IsRetrievingData}" Margin="16">
                     <ActivityIndicator IsRunning="True" HorizontalOptions="Center" />
                     <Label Text="{ex:Translate retrieving}" HorizontalTextAlignment="Center" HorizontalOptions="Fill" />
+                    <Label Text="{Binding AcquiringState}" HorizontalTextAlignment="Center" HorizontalOptions="Fill" />
                 </StackLayout>
                 <Grid BackgroundColor="LightGray" ColumnSpacing="1" RowSpacing="1" Padding="1" x:Name="Timetable" Margin="8,0"
                   IsVisible="{Binding Path=IsRetrievingData,Converter={StaticResource NegativeBoolConverter}}">

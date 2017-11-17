@@ -71,6 +71,24 @@ namespace SmartCampus2017X {
         }
         
         /// <summary>
+        ///   Accessing page... step に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        internal static string st_accessing {
+            get {
+                return ResourceManager.GetString("st_accessing", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Logging in... に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        internal static string st_logging {
+            get {
+                return ResourceManager.GetString("st_logging", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Fri に類似しているローカライズされた文字列を検索します。
         /// </summary>
         internal static string week_fri {

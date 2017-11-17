@@ -51,12 +51,16 @@ namespace SmartCampus2017X.Droid
             var mainController = new RemoteCampus.Controller(this.ScraperMain);
             var subController = new RemoteCampus.Controller(this.ScraperSub);
 
+            RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateAccessingStep(1, 4));
             var homemenu = new RemoteCampus.HomeMenuControl();
             var f = await homemenu.AccessIntersys(mainController);
+            RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateAccessingStep(2, 4));
             var intersys = await f.ContentControlTo(mainController, this.ScraperMain);
             var fc = await intersys.AccessCourseCategory(mainController);
+            RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateAccessingStep(3, 4));
             var course = await fc.ContentControlTo(mainController, this.ScraperMain);
             var cdetails = await course.AccessDetails(mainController);
+            RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateAccessingStep(4, 4));
             var courses = await cdetails.ParseCourseTable(mainController);
             this.RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateCells(courses));
         }
