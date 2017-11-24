@@ -62,6 +62,15 @@ namespace SmartCampus2017X {
         }
         
         /// <summary>
+        ///   Logout に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        internal static string logout {
+            get {
+                return ResourceManager.GetString("logout", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Retrieving personal timeline... に類似しているローカライズされた文字列を検索します。
         /// </summary>
         internal static string retrieving {

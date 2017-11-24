@@ -45,24 +45,40 @@ namespace SmartCampus2017X.Droid
 
         private async void RunSession()
         {
+            var logoutPoke = new Subject<Unit>();
             (string, string)? loginKeys = null;
-            while (!await this.TryAccessHomepage(loginKeys)) loginKeys = await this.ProcessLoginInput();
-            Log.Debug("app", "CampusHomepage loaded?");
-            var mainController = new RemoteCampus.Controller(this.ScraperMain);
-            var subController = new RemoteCampus.Controller(this.ScraperSub);
+            while (true)
+            {
+                while (!await this.TryAccessHomepage(loginKeys)) loginKeys = await this.ProcessLoginInput();
+                Log.Debug("app", "CampusHomepage loaded?");
+                var mainController = new RemoteCampus.Controller(this.ScraperMain);
+                var subController = new RemoteCampus.Controller(this.ScraperSub);
 
-            RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateAccessingStep(1, 4));
-            var homemenu = new RemoteCampus.HomeMenuControl();
-            var f = await homemenu.AccessIntersys(mainController);
-            RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateAccessingStep(2, 4));
-            var intersys = await f.ContentControlTo(mainController, this.ScraperMain);
-            var fc = await intersys.AccessCourseCategory(mainController);
-            RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateAccessingStep(3, 4));
-            var course = await fc.ContentControlTo(mainController, this.ScraperMain);
-            var cdetails = await course.AccessDetails(mainController);
-            RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateAccessingStep(4, 4));
-            var courses = await cdetails.ParseCourseTable(mainController);
-            this.RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateCells(courses));
+                RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateAccessingStep(1, 4));
+                var homemenu = new RemoteCampus.HomeMenuControl();
+                var loActionPath = await homemenu.GetLogoutActionPath(mainController);
+                Log.Debug("app", $"Logout from {loActionPath}");
+                Action performLogout = async () =>
+                {
+                    Log.Debug("app", "Logout");
+                    this.ScraperMain.Navigate(loActionPath); await mainController.WaitPageLoadingAsync();
+                    loginKeys = null;
+                    logoutPoke.OnNext(new Unit());
+                };
+                (this.appCommon.MainPage as MainPage).OnProcessLogout += performLogout;
+                var f = await homemenu.AccessIntersys(mainController);
+                RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateAccessingStep(2, 4));
+                var intersys = await f.ContentControlTo(mainController, this.ScraperMain);
+                var fc = await intersys.AccessCourseCategory(mainController);
+                RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateAccessingStep(3, 4));
+                var course = await fc.ContentControlTo(mainController, this.ScraperMain);
+                var cdetails = await course.AccessDetails(mainController);
+                RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateAccessingStep(4, 4));
+                var courses = await cdetails.ParseCourseTable(mainController);
+                this.RunOnUiThread(() => (this.appCommon.MainPage as MainPage).UpdateCells(courses));
+                await logoutPoke.FirstAsync();
+                (this.appCommon.MainPage as MainPage).OnProcessLogout -= performLogout;
+            }
         }
         private async Task<bool> TryAccessHomepage((string, string)? loginKeys)
         {
@@ -82,8 +98,8 @@ namespace SmartCampus2017X.Droid
             {
                 var currentUrl = await this.ScraperMain.PageLoadedUrlAsync();
                 Log.Debug("app", $"CurrentUrl: {currentUrl}");
-                if (currentUrl.Contains("campuslogin")) return false;
-                if (currentUrl.Contains("digitalCampus/campusHomepage")) return true;
+                if (currentUrl.IndexOf("campuslogin", StringComparison.CurrentCultureIgnoreCase) >= 0) return false;
+                if (currentUrl.IndexOf("digitalCampus/campusHomepage", StringComparison.CurrentCultureIgnoreCase) >= 0) return true;
             } while (true);
         }
         private async Task<(string, string)?> ProcessLoginInput()
@@ -104,8 +120,10 @@ namespace SmartCampus2017X.Droid
             var dpm = (int)TypedValue.ApplyDimension(ComplexUnitType.Dip, 24, this.Context.Resources.DisplayMetrics);
             innerView.SetPadding(dpm, 0, dpm, 0);
             var stackview = new LinearLayout(this.Activity) { Orientation = Orientation.Vertical };
-            var userinput = new EditText(this.Activity) { Hint = "Student ID" };
+            var userinput = new EditText(this.Activity) { Hint = "Student ID" }; userinput.SetSingleLine();
             var passinput = new EditText(this.Activity) { Hint = "Password", InputType = Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextVariationPassword };
+            userinput.ImeOptions = Android.Views.InputMethods.ImeAction.Next;
+            passinput.ImeOptions = Android.Views.InputMethods.ImeAction.Go;
             stackview.AddView(userinput); stackview.AddView(passinput); innerView.AddView(stackview);
             return (new AlertDialog.Builder(this.Activity)).SetTitle("Login to DigitalCampus")
                 .SetMessage("Required to log in to DigitalCampus").SetView(innerView)

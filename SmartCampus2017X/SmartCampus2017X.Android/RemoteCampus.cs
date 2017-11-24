@@ -18,6 +18,9 @@ using System.Web;
 
 namespace SmartCampus2017X.Droid.RemoteCampus
 {
+    [JsonObject("TypedContainer")]
+    public class TypedContainer<T> { [JsonProperty("value")] public T Value; }
+
     /// WebView Controller
     public sealed class Controller
     {
@@ -37,13 +40,13 @@ namespace SmartCampus2017X.Droid.RemoteCampus
         public Task<T> QueryAsync<T>(string q) where T: class, IJavaObject => this.eview.EvaluateAsync<T>(q);
         public async Task<string> QueryAnchorHref(string selector)
         {
-            var to = await this.eview.EvaluateAsync<Java.Lang.String>($"document.querySelector(\"{selector}\").getAttribute('href')");
-            return to.Substring(1, to.Length() - 1);
+            var to = await this.eview.EvaluateAsync<Java.Lang.String>($"({{ value: document.querySelector(\"{selector}\").getAttribute('href') }})");
+            return JsonConvert.DeserializeObject<TypedContainer<string>>(to.ToString()).Value;
         }
         public async Task<string> QueryAnchorHref(string selector, uint index)
         {
-            var to = await this.eview.EvaluateAsync<Java.Lang.String>($"document.querySelectorAll(\"{selector}\")[{index}].getAttribute('href')");
-            return to.Substring(1, to.Length() - 1);
+            var to = await this.eview.EvaluateAsync<Java.Lang.String>($"({{ value: document.querySelectorAll(\"{selector}\")[{index}].getAttribute('href') }})");
+            return JsonConvert.DeserializeObject<TypedContainer<string>>(to.ToString()).Value;
         }
         public async Task<Controller> JumpToAnchorHref(string selector)
         {
@@ -70,12 +73,18 @@ namespace SmartCampus2017X.Droid.RemoteCampus
     public sealed class HomeMenuControl
     {
         const string IntersysLinkPath = "#gnav ul li.menuBlock ul li:first-child a";
+        const string LogoutBlockPath = "#gnav ul li.menuBlock.menuBlockLink";
 
         public async Task<CampusPlan.Frame<CampusPlan.EmptyMenu, CampusPlan.MainPage>> AccessIntersys(Controller ctrl)
         {
             await ctrl.JumpToAnchorHref(IntersysLinkPath);
             await ctrl.WaitPageLoadingAsync();
             return new CampusPlan.Frame<CampusPlan.EmptyMenu, CampusPlan.MainPage>();
+        }
+        public async Task<string> GetLogoutActionPath(Controller ctrl)
+        {
+            var v = await ctrl.QueryAsync<Java.Lang.String>($"({{ value: document.querySelectorAll(\"{LogoutBlockPath}\")[1].querySelector('a').href }})");
+            return JsonConvert.DeserializeObject<TypedContainer<string>>(v.ToString()).Value;
         }
     }
 

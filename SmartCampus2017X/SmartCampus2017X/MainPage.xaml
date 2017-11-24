@@ -26,46 +26,49 @@
                     <Label Text="{ex:Translate retrieving}" HorizontalTextAlignment="Center" HorizontalOptions="Fill" />
                     <Label Text="{Binding AcquiringState}" HorizontalTextAlignment="Center" HorizontalOptions="Fill" />
                 </StackLayout>
-                <Grid BackgroundColor="LightGray" ColumnSpacing="1" RowSpacing="1" Padding="1" x:Name="Timetable" Margin="8,0"
-                  IsVisible="{Binding Path=IsRetrievingData,Converter={StaticResource NegativeBoolConverter}}">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="auto" />
-                        <RowDefinition Height="auto" />
-                        <RowDefinition Height="auto" />
-                        <RowDefinition Height="auto" />
-                        <RowDefinition Height="auto" />
-                        <RowDefinition Height="auto" />
-                        <RowDefinition Height="auto" />
-                        <RowDefinition Height="auto" />
-                        <RowDefinition Height="auto" />
-                    </Grid.RowDefinitions>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
+                <StackLayout Orientation="Vertical" HorizontalOptions="Fill" IsVisible="{Binding IsRetrievingData,Converter={StaticResource NegativeBoolConverter}}">
+                    <Button Text="{ex:Translate logout}" HorizontalOptions="End" Margin="8" Clicked="DoLogout" />
+                    <Grid BackgroundColor="LightGray" ColumnSpacing="1" RowSpacing="1" Padding="1" x:Name="Timetable" Margin="8,0"
+                          IsVisible="{Binding Path=IsRetrievingData,Converter={StaticResource NegativeBoolConverter}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="auto" />
+                            <RowDefinition Height="auto" />
+                            <RowDefinition Height="auto" />
+                            <RowDefinition Height="auto" />
+                            <RowDefinition Height="auto" />
+                            <RowDefinition Height="auto" />
+                            <RowDefinition Height="auto" />
+                            <RowDefinition Height="auto" />
+                            <RowDefinition Height="auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
 
-                    <WebView WidthRequest="0" HeightRequest="0" IsVisible="False" Grid.Column="0" Grid.Row="0" x:Name="BackgroundWeb" />
-                    <BoxView HorizontalOptions="Fill" VerticalOptions="Fill" WidthRequest="1" HeightRequest="1" Grid.Column="0" Grid.Row="0" BackgroundColor="White" />
-                    <Label BackgroundColor="White" Grid.Column="1" Grid.Row="0" Text="{ex:Translate week_mon}" FontAttributes="Bold" HorizontalTextAlignment="Center" />
-                    <Label BackgroundColor="White" Grid.Column="2" Grid.Row="0" Text="{ex:Translate week_tue}" FontAttributes="Bold" HorizontalTextAlignment="Center" />
-                    <Label BackgroundColor="White" Grid.Column="3" Grid.Row="0" Text="{ex:Translate week_wed}" FontAttributes="Bold" HorizontalTextAlignment="Center" />
-                    <Label BackgroundColor="White" Grid.Column="4" Grid.Row="0" Text="{ex:Translate week_thu}" FontAttributes="Bold" HorizontalTextAlignment="Center" />
-                    <Label BackgroundColor="White" Grid.Column="5" Grid.Row="0" Text="{ex:Translate week_fri}" FontAttributes="Bold" HorizontalTextAlignment="Center" />
-                    <Label BackgroundColor="White" Grid.Column="6" Grid.Row="0" Text="{ex:Translate week_sat}" FontAttributes="Bold" HorizontalTextAlignment="Center" />
-                    <Label BackgroundColor="White" Grid.Column="0" Grid.Row="1" Text="1" FontAttributes="Bold" VerticalTextAlignment="Center" />
-                    <Label BackgroundColor="White" Grid.Column="0" Grid.Row="2" Text="2" FontAttributes="Bold" VerticalTextAlignment="Center" />
-                    <Label BackgroundColor="White" Grid.Column="0" Grid.Row="3" Text="3" FontAttributes="Bold" VerticalTextAlignment="Center" />
-                    <Label BackgroundColor="White" Grid.Column="0" Grid.Row="4" Text="4" FontAttributes="Bold" VerticalTextAlignment="Center" />
-                    <Label BackgroundColor="White" Grid.Column="0" Grid.Row="5" Text="5" FontAttributes="Bold" VerticalTextAlignment="Center" />
-                    <Label BackgroundColor="White" Grid.Column="0" Grid.Row="6" Text="6" FontAttributes="Bold" VerticalTextAlignment="Center" />
-                    <Label BackgroundColor="White" Grid.Column="0" Grid.Row="7" Text="7" FontAttributes="Bold" VerticalTextAlignment="Center" />
-                    <Label BackgroundColor="White" Grid.Column="0" Grid.Row="8" Text="8" FontAttributes="Bold" VerticalTextAlignment="Center" />
-                </Grid>
+                        <WebView WidthRequest="0" HeightRequest="0" IsVisible="False" Grid.Column="0" Grid.Row="0" x:Name="BackgroundWeb" />
+                        <BoxView HorizontalOptions="Fill" VerticalOptions="Fill" WidthRequest="1" HeightRequest="1" Grid.Column="0" Grid.Row="0" BackgroundColor="White" />
+                        <Label BackgroundColor="White" Grid.Column="1" Grid.Row="0" Text="{ex:Translate week_mon}" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+                        <Label BackgroundColor="White" Grid.Column="2" Grid.Row="0" Text="{ex:Translate week_tue}" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+                        <Label BackgroundColor="White" Grid.Column="3" Grid.Row="0" Text="{ex:Translate week_wed}" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+                        <Label BackgroundColor="White" Grid.Column="4" Grid.Row="0" Text="{ex:Translate week_thu}" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+                        <Label BackgroundColor="White" Grid.Column="5" Grid.Row="0" Text="{ex:Translate week_fri}" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+                        <Label BackgroundColor="White" Grid.Column="6" Grid.Row="0" Text="{ex:Translate week_sat}" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+                        <Label BackgroundColor="White" Grid.Column="0" Grid.Row="1" Text="1" FontAttributes="Bold" VerticalTextAlignment="Center" />
+                        <Label BackgroundColor="White" Grid.Column="0" Grid.Row="2" Text="2" FontAttributes="Bold" VerticalTextAlignment="Center" />
+                        <Label BackgroundColor="White" Grid.Column="0" Grid.Row="3" Text="3" FontAttributes="Bold" VerticalTextAlignment="Center" />
+                        <Label BackgroundColor="White" Grid.Column="0" Grid.Row="4" Text="4" FontAttributes="Bold" VerticalTextAlignment="Center" />
+                        <Label BackgroundColor="White" Grid.Column="0" Grid.Row="5" Text="5" FontAttributes="Bold" VerticalTextAlignment="Center" />
+                        <Label BackgroundColor="White" Grid.Column="0" Grid.Row="6" Text="6" FontAttributes="Bold" VerticalTextAlignment="Center" />
+                        <Label BackgroundColor="White" Grid.Column="0" Grid.Row="7" Text="7" FontAttributes="Bold" VerticalTextAlignment="Center" />
+                        <Label BackgroundColor="White" Grid.Column="0" Grid.Row="8" Text="8" FontAttributes="Bold" VerticalTextAlignment="Center" />
+                    </Grid>
+                </StackLayout>
             </Grid>
         </ScrollView>
     </ContentPage.Content>

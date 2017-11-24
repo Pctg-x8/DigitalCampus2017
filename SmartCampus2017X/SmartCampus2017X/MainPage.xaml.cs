@@ -54,6 +54,7 @@ namespace SmartCampus2017X
             this.BindingContext = this.vm = new MainPageViewModel();
             // this.AddCellAt("サンプル講義A 概論", "E15-17", Week.Wed, 2);
         }
+        public event Action OnProcessLogout;
 
         public void UpdateAccessingStep(int current, int max)
         {
@@ -91,6 +92,12 @@ namespace SmartCampus2017X
         {
             var c = (sender as StackLayout).Parent.BindingContext as TimetableCellData;
             await DisplayAlert(c.Name, c.RoomInfo, "close");
+        }
+        public void DoLogout(object sender, EventArgs e)
+        {
+            this.OnProcessLogout();
+            this.vm.IsRetrievingData = true;
+            this.vm.AcquiringState = AppResources.st_logging;
         }
         
         private void TapGestureRecognizer_Tapped(object sender, EventArgs e)
