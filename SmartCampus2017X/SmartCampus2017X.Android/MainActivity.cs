@@ -43,14 +43,37 @@ namespace SmartCampus2017X.Droid
             this.RunSession();
         }
 
+        private const string SharedPrefsName = "com.cterm2.SmartCampus2017X.Users";
+        private void RegisterUserKeys((string, string) keys)
+        {
+            var prefs = this.GetSharedPreferences(SharedPrefsName, FileCreationMode.Private);
+            prefs.Edit().PutString("ID", keys.Item1).PutString("Pass", keys.Item2).Commit();
+        }
+        private void ClearUserKeys()
+        {
+            var prefs = this.GetSharedPreferences(SharedPrefsName, FileCreationMode.Private);
+            prefs.Edit().Remove("ID").Remove("Pass").Commit();
+        }
+        private (string, string)? LoadUserKeys()
+        {
+            var prefs = this.GetSharedPreferences(SharedPrefsName, FileCreationMode.Private);
+            var (name0, pass0) = (prefs.GetString("ID", null), prefs.GetString("Pass", null));
+            if (name0 == null || pass0 == null) return null; else return (name0, pass0);
+        }
+
         private async void RunSession()
         {
             var logoutPoke = new Subject<Unit>();
-            (string, string)? loginKeys = null;
+            (string, string)? loginKeys = this.LoadUserKeys();
             while (true)
             {
-                while (!await this.TryAccessHomepage(loginKeys)) loginKeys = await this.ProcessLoginInput();
+                if (!await this.TryAccessHomepage(null))
+                {
+                    Log.Debug("app", "Trying to autologin...");
+                    while (!await this.TryAccessHomepage(loginKeys)) loginKeys = await this.ProcessLoginInput();
+                }
                 Log.Debug("app", "CampusHomepage loaded?");
+                this.RegisterUserKeys(loginKeys.Value);
                 var mainController = new RemoteCampus.Controller(this.ScraperMain);
                 var subController = new RemoteCampus.Controller(this.ScraperSub);
 
@@ -62,7 +85,7 @@ namespace SmartCampus2017X.Droid
                 {
                     Log.Debug("app", "Logout");
                     this.ScraperMain.Navigate(loActionPath); await mainController.WaitPageLoadingAsync();
-                    loginKeys = null;
+                    this.ClearUserKeys(); loginKeys = null;
                     logoutPoke.OnNext(new Unit());
                 };
                 (this.appCommon.MainPage as MainPage).OnProcessLogout += performLogout;
